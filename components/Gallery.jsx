@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import gsap from 'gsap'
+import { ScrollTrigger } from 'gsap/ScrollTrigger'
+
+gsap.registerPlugin(ScrollTrigger)
 
 const FALLBACK_ITEMS = [
   {
@@ -94,9 +97,6 @@ function ArrowIcon({ direction = 'right' }) {
   )
 }
 
-/** 
- * Main Name Arrow (Top Left) - Slowed Down
- */
 function DrawnArrow({ animate = false }) {
   return (
     <svg
@@ -132,9 +132,6 @@ function DrawnArrow({ animate = false }) {
   )
 }
 
-/** 
- * Event Details Arrow (Bottom Right Corner - Outside) - Slowed Down & Pointing Up-Left
- */
 function DrawnArrowCorner({ animate = false }) {
   return (
     <svg
@@ -174,8 +171,11 @@ export default function Gallery() {
   const [items, setItems] = useState(FALLBACK_ITEMS)
   const [index, setIndex] = useState(0)
   const [hovered, setHovered] = useState(false)
+  const sectionRef = useRef(null)
+  const titleRef = useRef(null)
   const cardRef = useRef(null)
   const directionRef = useRef(1)
+  const blobRefs = useRef([])
 
   useEffect(() => {
     fetch('/api/v1/events')
@@ -236,22 +236,64 @@ export default function Gallery() {
     setHovered(false)
   }, [index])
 
+
+  useEffect(() => {
+    const ctx = gsap.context(() => {
+      gsap.fromTo(
+        titleRef.current,
+        { opacity: 0, y: 50, scale: 0.92 },
+        {
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          duration: 1.1,
+          ease: 'power4.out',
+          scrollTrigger: {
+            trigger: titleRef.current,
+            start: 'top 85%'
+          }
+        }
+      )
+
+      const speeds = [-90, 70, -55]
+
+      blobRefs.current.forEach((el, i) => {
+        if (!el) return
+        gsap.to(el, {
+          yPercent: speeds[i],
+          ease: 'none',
+          scrollTrigger: {
+            trigger: sectionRef.current,
+            start: 'top bottom',
+            end: 'bottom top',
+            scrub: true
+          }
+        })
+      })
+    }, sectionRef)
+
+    return () => ctx.revert()
+  }, [])
+
   if (!current) return null
 
   return (
-    <section id="gallery" className="relative z-10 overflow-hidden bg-[#050505] px-6 py-32 md:px-16">
+    <section id="gallery" ref={sectionRef} className="relative z-10 overflow-hidden bg-[#050505] px-6 py-32 md:px-16">
       
-      {/* Red moving smoke behind the card */}
+      {/* Red moving smoke behind the card — parallax layer */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div
+          ref={(el) => (blobRefs.current[0] = el)}
           className="smoke-blob animate-drift-a absolute -left-[10%] top-[10%] h-[600px] w-[600px]"
           style={{ background: 'radial-gradient(circle, rgba(220,20,60,0.5), transparent 65%)' }}
         />
         <div
+          ref={(el) => (blobRefs.current[1] = el)}
           className="smoke-blob animate-drift-b absolute -right-[5%] top-[40%] h-[500px] w-[500px]"
           style={{ background: 'radial-gradient(circle, rgba(255,0,50,0.4), transparent 65%)' }}
         />
         <div
+          ref={(el) => (blobRefs.current[2] = el)}
           className="smoke-blob animate-drift-c absolute bottom-[-10%] left-[20%] h-[700px] w-[700px]"
           style={{ background: 'radial-gradient(circle, rgba(180,0,0,0.45), transparent 65%)' }}
         />
@@ -261,7 +303,7 @@ export default function Gallery() {
       <div className="relative z-10 mx-auto max-w-6xl">
         <div className="text-center">
           <p className="text-xs uppercase tracking-[0.4em] text-white/50 md:text-sm">Moments that matter</p>
-          <h2 className="mt-3 font-display text-6xl font-black uppercase tracking-tight text-white md:text-8xl">
+          <h2 ref={titleRef} className="mt-3 font-display text-6xl font-black uppercase tracking-tight text-white md:text-8xl">
             Gallery
           </h2>
           <span className="mx-auto mt-4 block h-1 w-16 rounded-full bg-coral shadow-[0_0_15px_rgba(255,107,91,0.6)]" />

@@ -1,5 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: {
+    // Runs instrumentation.js on boot (starts the booking queue worker).
+    instrumentationHook: true,
+    // Keep these as plain Node requires instead of bundling them.
+    serverComponentsExternalPackages: ['ioredis', 'bullmq']
+  },
+
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'picsum.photos' },

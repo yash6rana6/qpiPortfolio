@@ -1,6 +1,7 @@
 /**
- * Creates the first admin account and a few sample events.
- * Run once after filling in .env.local:  npm run seed
+ * Creates the first admin account and sample shows in 5 cities.
+ * Safe to run again: shows are matched by title and refreshed, admin role confirmed.
+ *   npm run seed
  */
 require('dotenv').config({ path: '.env.local' })
 
@@ -33,11 +34,14 @@ const EventSchema = new mongoose.Schema(
   {
     title: String,
     category: String,
+    city: String,
     description: String,
     venue: String,
     date: Date,
     posterImage: String,
     videoUrl: String,
+    rows: Number,
+    seatsPerRow: Number,
     totalSeats: Number,
     availableSeats: Number,
     pricePerSeat: Number,
@@ -48,60 +52,40 @@ const EventSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
+const BookedSeatSchema = new mongoose.Schema(
+  {
+    event: mongoose.Schema.Types.ObjectId,
+    seatId: String,
+    booking: mongoose.Schema.Types.ObjectId,
+    user: mongoose.Schema.Types.ObjectId
+  },
+  { timestamps: true }
+)
+BookedSeatSchema.index({ event: 1, seatId: 1 }, { unique: true })
+
 const User = mongoose.models.User || mongoose.model('User', UserSchema)
 const Event = mongoose.models.Event || mongoose.model('Event', EventSchema)
+const BookedSeat = mongoose.models.BookedSeat || mongoose.model('BookedSeat', BookedSeatSchema)
+
+const days = (n) => new Date(Date.now() + n * 24 * 60 * 60 * 1000)
+const POSTER = (id) => `https://images.pexels.com/videos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&w=900`
+const VIDEO = 'https://videos.pexels.com/video-files/12695733/12695733-hd_1920_1080_24fps.mp4'
 
 const SAMPLE_EVENTS = [
-  {
-    title: 'Neon Vice Festival',
-    category: 'Music Festival',
-    venue: 'JLN Stadium, New Delhi',
-    description: 'Three nights of electronic music under a fully synced pink-and-violet light rig.',
-    date: new Date('2026-11-14'),
-    posterImage: 'https://images.pexels.com/videos/12695733/pexels-photo-12695733.jpeg?auto=compress&cs=tinysrgb&w=900',
-    videoUrl: 'https://videos.pexels.com/video-files/12695733/12695733-hd_1920_1080_24fps.mp4',
-    totalSeats: 500,
-    availableSeats: 500,
-    pricePerSeat: 1499,
-    isRecent: true,
-    accentColor: 'pink'
-  },
-  {
-    title: 'Sunburst Circuit Night',
-    category: 'Live Show',
-    venue: 'Phoenix Marketcity, Mumbai',
-    description: 'A late-night set with cyan strobe walls timed to the drop, streamed live.',
-    date: new Date('2026-10-02'),
-    posterImage: 'https://images.pexels.com/videos/12695727/pexels-photo-12695727.jpeg?auto=compress&cs=tinysrgb&w=900',
-    videoUrl: 'https://videos.pexels.com/video-files/12695733/12695733-hd_1920_1080_24fps.mp4',
-    totalSeats: 300,
-    availableSeats: 300,
-    pricePerSeat: 1999,
-    isRecent: true,
-    accentColor: 'cyan'
-  },
-  {
-    title: 'Amber Circuit Showdown',
-    category: 'Esports',
-    venue: 'Hitex Arena, Hyderabad',
-    description: 'Regional finals with a stage lighting design built around the broadcast.',
-    date: new Date('2026-09-20'),
-    posterImage: 'https://images.pexels.com/videos/12695729/pexels-photo-12695729.jpeg?auto=compress&cs=tinysrgb&w=900',
-    videoUrl: 'https://videos.pexels.com/video-files/12695733/12695733-hd_1920_1080_24fps.mp4',
-    totalSeats: 800,
-    availableSeats: 800,
-    pricePerSeat: 999,
-    isRecent: true,
-    accentColor: 'amber'
-  }
+  { title: 'Neon Vice Festival', category: 'Music Festival', city: 'Delhi', venue: 'JLN Stadium', description: 'Three nights of electronic music under a fully synced pink-and-violet light rig.', date: days(40), poster: 12695733, rows: 12, seatsPerRow: 16, pricePerSeat: 1499, accentColor: 'pink' },
+  { title: 'Sunburst Circuit Night', category: 'Live Show', city: 'Mumbai', venue: 'Phoenix Marketcity', description: 'A late-night set with cyan strobe walls timed to the drop, streamed live.', date: days(25), poster: 12695727, rows: 10, seatsPerRow: 14, pricePerSeat: 1999, accentColor: 'cyan' },
+  { title: 'Amber Circuit Showdown', category: 'Esports', city: 'Hyderabad', venue: 'Hitex Arena', description: 'Regional finals with a stage lighting design built around the broadcast.', date: days(18), poster: 12695729, rows: 14, seatsPerRow: 20, pricePerSeat: 999, accentColor: 'amber' },
+  { title: 'Midnight Comedy Club', category: 'Comedy', city: 'Delhi', venue: 'Siri Fort Auditorium', description: 'Five stand-ups, one stage, zero filter.', date: days(12), poster: 12695727, rows: 8, seatsPerRow: 12, pricePerSeat: 599, accentColor: 'lime' },
+  { title: 'Lakeside Indie Evening', category: 'Concert', city: 'Bengaluru', venue: 'Palace Grounds', description: 'Indie bands at golden hour, food trucks and fairy lights.', date: days(30), poster: 12695729, rows: 10, seatsPerRow: 18, pricePerSeat: 799, accentColor: 'pink' },
+  { title: 'Gomti Nights Live', category: 'Concert', city: 'Lucknow', venue: 'Ekana Sports City', description: 'A riverside evening of ghazals meets electronica.', date: days(22), poster: 12695733, rows: 9, seatsPerRow: 14, pricePerSeat: 499, accentColor: 'cyan' }
 ]
 
 async function run() {
   await mongoose.connect(MONGODB_URI)
+  await BookedSeat.syncIndexes() // unique (event, seatId) — the final double-booking guard
 
   const email = SEED_ADMIN_EMAIL.toLowerCase().trim()
   const existing = await User.findOne({ email })
-
   if (existing) {
     existing.role = 'admin'
     await existing.save()
@@ -116,12 +100,20 @@ async function run() {
     console.log(`Admin created: ${email}`)
   }
 
-  const eventCount = await Event.countDocuments()
-  if (eventCount === 0) {
-    await Event.insertMany(SAMPLE_EVENTS)
-    console.log(`Inserted ${SAMPLE_EVENTS.length} sample events`)
-  } else {
-    console.log(`Skipped sample events — ${eventCount} already in the database`)
+  for (const { poster, ...ev } of SAMPLE_EVENTS) {
+    const total = ev.rows * ev.seatsPerRow
+    const doc = await Event.findOneAndUpdate(
+      { title: ev.title },
+      {
+        $set: { ...ev, totalSeats: total, posterImage: POSTER(poster), videoUrl: VIDEO, status: 'published', isRecent: true },
+        $setOnInsert: { availableSeats: total }
+      },
+      { upsert: true, new: true }
+    )
+    // keep the counter honest if the layout changed on a re-seed
+    const sold = await BookedSeat.countDocuments({ event: doc._id })
+    await Event.updateOne({ _id: doc._id }, { $set: { availableSeats: total - sold } })
+    console.log(`Show ready: ${ev.title} (${ev.city}, ${total} seats)`)
   }
 
   await mongoose.disconnect()

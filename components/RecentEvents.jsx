@@ -71,7 +71,7 @@ function OvalVideo({ event, accent, slide }) {
   return (
     <div
       data-slide={slide}
-      className="will-change-transform overflow-hidden rounded-full ring-1 ring-white/10"
+      className="parallax-video will-change-transform overflow-hidden rounded-full ring-1 ring-white/10"
       style={{
         aspectRatio: '1 / 1',
         boxShadow: `0 25px 60px ${accent.shadow}`
@@ -166,6 +166,22 @@ export default function RecentEvents() {
               }
             }
           )
+        }
+
+        // Parallax — the round video drifts at a different rate than its text
+        // card as the row scrolls through the viewport.
+        const videoEl = row.querySelector('.parallax-video')
+        if (videoEl) {
+          gsap.to(videoEl, {
+            yPercent: -18,
+            ease: 'none',
+            scrollTrigger: {
+              trigger: row,
+              start: 'top bottom',
+              end: 'bottom top',
+              scrub: true
+            }
+          })
         }
       })
     }, sectionRef)

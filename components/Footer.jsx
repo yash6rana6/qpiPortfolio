@@ -56,6 +56,7 @@ function StickerShape({ s }) {
 
 export default function Footer() {
   const footerRef = useRef(null)
+  const titleRef = useRef(null)
   const pileRef = useRef(null)
   const stickerRefs = useRef([])
 
@@ -88,6 +89,23 @@ export default function Footer() {
 
   useEffect(() => {
     const ctx = gsap.context(() => {
+      // Heading slides up and fades in as the footer comes into view.
+      gsap.fromTo(
+        titleRef.current,
+        { opacity: 0, y: 50, scale: 0.94 },
+        {
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          duration: 1.1,
+          ease: 'power4.out',
+          scrollTrigger: {
+            trigger: titleRef.current,
+            start: 'top 90%'
+          }
+        }
+      )
+
       stickerRefs.current.forEach((el, i) => {
         if (!el) return
         const finalRotate = STICKERS[i].rotate
@@ -131,7 +149,7 @@ export default function Footer() {
       {/* Top row: heading + email signup */}
       <div className="flex flex-col justify-between gap-10 md:flex-row md:items-start">
         <div className="max-w-xl">
-          <h2 className="font-display text-5xl font-black leading-[0.95] tracking-tight text-white md:text-7xl drop-shadow-md">
+          <h2 ref={titleRef} className="font-display text-5xl font-black leading-[0.95] tracking-tight text-white md:text-7xl drop-shadow-md">
             QPIE Digital
             <br />
             is here

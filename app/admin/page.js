@@ -14,9 +14,10 @@ const EMPTY_FORM = {
   posterImage: '',
   videoUrl: '',
   accentColor: 'pink',
+  city: '',
+  rows: 10,
+  seatsPerRow: 12,
   pricePerSeat: 0,
-  totalSeats: 0,
-  availableSeats: 0,
   isRecent: true,
   status: 'published'
 }
@@ -38,7 +39,7 @@ export default function AdminPage() {
 
   const loadEvents = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/events', { cache: 'no-store' })
+      const res = await fetch('/api/v1/events?all=true', { cache: 'no-store' })
       const data = await res.json()
       setEvents(Array.isArray(data) ? data : [])
     } catch {
@@ -103,8 +104,8 @@ export default function AdminPage() {
     const payload = {
       ...form,
       pricePerSeat: Number(form.pricePerSeat) || 0,
-      totalSeats: Number(form.totalSeats) || 0,
-      availableSeats: Number(form.availableSeats) || 0,
+      rows: Number(form.rows) || 10,
+      seatsPerRow: Number(form.seatsPerRow) || 10,
       date: form.date || undefined
     }
 
@@ -205,7 +206,7 @@ export default function AdminPage() {
                       {event.title}
                     </p>
                   </div>
-                  <p className="truncate text-xs font-medium text-zinc-500">{event.venue}</p>
+                  <p className="truncate text-xs font-medium text-zinc-500">{event.venue}{event.city ? ` · ${event.city}` : ''}</p>
                   <p className="text-xs text-zinc-400">
                     ₹{event.pricePerSeat} · {event.availableSeats}/{event.totalSeats} seats left
                     {event.status === 'draft' && ' · draft'}
@@ -264,28 +265,18 @@ export default function AdminPage() {
               </div>
 
               <div className="space-y-1">
-                <label htmlFor="totalSeats" className={labelClass}>Total seats</label>
-                <input
-                  id="totalSeats"
-                  type="number"
-                  min={0}
-                  value={form.totalSeats}
-                  onChange={(e) => {
-                    const total = e.target.value
-                    setForm((f) => ({
-                      ...f,
-                      totalSeats: total,
-                      // New event: seats on sale start equal to capacity.
-                      availableSeats: editingId ? f.availableSeats : total
-                    }))
-                  }}
-                  className={field}
-                />
+                <label htmlFor="city" className={labelClass}>City</label>
+                <input id="city" placeholder="Delhi" value={form.city || ''} onChange={(e) => setForm({ ...form, city: e.target.value })} required className={field} />
               </div>
 
               <div className="space-y-1">
-                <label htmlFor="availableSeats" className={labelClass}>Seats still on sale</label>
-                <input id="availableSeats" type="number" min={0} value={form.availableSeats} onChange={(e) => setForm({ ...form, availableSeats: e.target.value })} className={field} />
+                <label htmlFor="rows" className={labelClass}>Rows (A–Z, max 26)</label>
+                <input id="rows" type="number" min={1} max={26} value={form.rows} onChange={(e) => setForm({ ...form, rows: e.target.value })} className={field} />
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor="seatsPerRow" className={labelClass}>Seats per row (max 40)</label>
+                <input id="seatsPerRow" type="number" min={1} max={40} value={form.seatsPerRow} onChange={(e) => setForm({ ...form, seatsPerRow: e.target.value })} className={field} />
               </div>
 
               <div className="space-y-1">

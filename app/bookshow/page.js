@@ -1,257 +1,229 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useAuth } from '../../components/AuthProvider.jsx'
+import gsap from 'gsap'
+import CityPicker from '../../components/booking/CityPicker.jsx'
+import SeatSheet from '../../components/booking/SeatSheet.jsx'
 
-function loadRazorpayScript() {
-  return new Promise((resolve) => {
-    if (document.getElementById('razorpay-checkout-js')) return resolve(true)
-    const script = document.createElement('script')
-    script.id = 'razorpay-checkout-js'
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js'
-    script.onload = () => resolve(true)
-    script.onerror = () => resolve(false)
-    document.body.appendChild(script)
-  })
-}
+const ACCENT = { pink: '#FF2A85', cyan: '#00B4D8', amber: '#FFB627', lime: '#1FAE8E' }
+const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 function formatDate(value) {
   if (!value) return 'Date to be announced'
-  return new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  return new Date(value).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 export default function BookShowPage() {
-  const { user, loading: authLoading } = useAuth()
-  const router = useRouter()
-
+  const [cities, setCities] = useState([])
+  const [city, setCity] = useState('')
   const [events, setEvents] = useState([])
-  const [loadingEvents, setLoadingEvents] = useState(true)
-  const [selectedId, setSelectedId] = useState(null)
-  const [seats, setSeats] = useState(1)
-  const [status, setStatus] = useState('idle') // idle | processing | confirmed
-  const [message, setMessage] = useState('')
-  const [confirmation, setConfirmation] = useState(null)
+  const [loadingCities, setLoadingCities] = useState(true)
+  const [loadingEvents, setLoadingEvents] = useState(false)
+  const [error, setError] = useState('')
+  const [active, setActive] = useState(null)
 
-  async function loadEvents() {
-    try {
-      const res = await fetch('/api/v1/events', { cache: 'no-store' })
-      const data = await res.json()
-      const bookable = Array.isArray(data) ? data.filter((e) => e.pricePerSeat > 0) : []
-      setEvents(bookable)
-      setSelectedId((current) => current || bookable[0]?._id || null)
-    } catch {
-      setMessage('Events could not be loaded. Refresh to try again.')
-    } finally {
-      setLoadingEvents(false)
-    }
-  }
+  const headerRef = useRef(null)
+  const gridRef = useRef(null)
 
+  // 1) cities
   useEffect(() => {
-    loadEvents()
+    fetch('/api/v1/cities')
+      .then((r) => r.json())
+      .then((list) => {
+        const rows = Array.isArray(list) ? list : []
+        setCities(rows)
+        let remembered = ''
+        try {
+          remembered = localStorage.getItem('qpie_city') || ''
+        } catch {}
+        const pick = rows.find((c) => c.city === remembered) ? remembered : rows[0]?.city || ''
+        setCity(pick)
+      })
+      .catch(() => setError('Cities could not be loaded. Refresh to try again.'))
+      .finally(() => setLoadingCities(false))
   }, [])
 
-  const selectedEvent = events.find((e) => e._id === selectedId) || null
-  const maxSeats = Math.min(selectedEvent?.availableSeats ?? 1, 10)
-  const totalAmount = (selectedEvent?.pricePerSeat || 0) * seats
-
-  async function handlePay() {
-    if (!user) {
-      router.push('/login?next=/bookshow')
-      return
-    }
-    if (!selectedEvent) return
-
-    setStatus('processing')
-    setMessage('')
-
-    const scriptLoaded = await loadRazorpayScript()
-    if (!scriptLoaded) {
-      setStatus('idle')
-      setMessage('The payment window could not load. Check your connection and try again.')
-      return
-    }
-
+  // 2) shows in the chosen city
+  useEffect(() => {
+    if (!city) return
     try {
-      // Server decides the amount from the event's own price.
-      const res = await fetch('/api/v1/bookings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId: selectedEvent._id, seats })
+      localStorage.setItem('qpie_city', city)
+    } catch {}
+
+    let cancelled = false
+    setLoadingEvents(true)
+    fetch(`/api/v1/events?city=${encodeURIComponent(city)}&upcoming=true`)
+      .then((r) => r.json())
+      .then((list) => {
+        if (cancelled) return
+        setEvents(Array.isArray(list) ? list.filter((e) => e.pricePerSeat > 0) : [])
       })
-      const order = await res.json()
-      if (!res.ok) throw new Error(order.error || 'Booking could not be started')
+      .catch(() => !cancelled && setError('Shows could not be loaded. Refresh to try again.'))
+      .finally(() => !cancelled && setLoadingEvents(false))
 
-      const razorpay = new window.Razorpay({
-        key: order.keyId,
-        amount: order.amount,
-        currency: order.currency,
-        order_id: order.orderId,
-        name: 'QPIE',
-        description: `${seats} seat${seats > 1 ? 's' : ''} · ${order.eventTitle}`,
-        prefill: { name: user.name, email: user.email, contact: user.phone || '' },
-        theme: { color: '#FF2A85' },
-        handler: async (response) => {
-          try {
-            const verifyRes = await fetch('/api/v1/bookings/verify', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(response)
-            })
-            const result = await verifyRes.json()
-            if (!verifyRes.ok) throw new Error(result.error || 'Payment could not be confirmed')
-
-            setConfirmation(result)
-            setStatus('confirmed')
-            loadEvents()
-          } catch (err) {
-            setStatus('idle')
-            setMessage(err.message)
-          }
-        },
-        modal: {
-          ondismiss: () => {
-            setStatus('idle')
-            setMessage('Payment was cancelled. Your seats are still available.')
-          }
-        }
-      })
-
-      razorpay.on('payment.failed', (response) => {
-        setStatus('idle')
-        setMessage(response?.error?.description || 'The payment did not go through.')
-      })
-
-      razorpay.open()
-    } catch (err) {
-      setStatus('idle')
-      setMessage(err.message)
+    return () => {
+      cancelled = true
     }
-  }
+  }, [city])
 
-  if (status === 'confirmed' && confirmation) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-sand px-6 text-ink">
-        <div className="w-full max-w-md text-center">
-          <p className="font-display text-sm font-semibold text-ocean">Payment confirmed</p>
-          <h1 className="mt-4 font-display text-4xl font-black tracking-tight">You&apos;re going.</h1>
-          <p className="mt-4 text-sm text-ink/60">Show this code at the venue entrance.</p>
-          <p className="mt-6 rounded-2xl border border-coral/15 bg-white px-6 py-5 font-display text-3xl font-black tracking-[0.2em] text-coral">
-            {confirmation.bookingCode}
-          </p>
-          <div className="mt-8 flex flex-col gap-3">
-            <Link
-              href="/bookings"
-              className="rounded-full bg-coral py-3.5 text-sm font-semibold text-white shadow-glow-coral"
-            >
-              View my tickets
-            </Link>
-            <Link href="/bookshow" onClick={() => setStatus('idle')} className="text-sm text-ink/50 hover:text-ink">
-              Book another show
-            </Link>
-          </div>
-        </div>
-      </main>
-    )
+  // header intro
+  useEffect(() => {
+    if (reduced() || !headerRef.current) return
+    const ctx = gsap.context(() => {
+      gsap.from('.hdr-line', { yPercent: 110, opacity: 0, duration: 0.9, stagger: 0.12, ease: 'power4.out' })
+      gsap.from('.hdr-sub', { y: 14, opacity: 0, duration: 0.7, delay: 0.35, ease: 'power3.out' })
+    }, headerRef)
+    return () => ctx.revert()
+  }, [])
+
+  // cards stagger in whenever the city's shows change
+  useEffect(() => {
+    if (loadingEvents || !events.length || reduced() || !gridRef.current) return
+    const ctx = gsap.context(() => {
+      gsap.from('.show-card', { y: 50, opacity: 0, scale: 0.96, duration: 0.7, stagger: 0.09, ease: 'power4.out', clearProps: 'all' })
+    }, gridRef)
+    return () => ctx.revert()
+  }, [events, loadingEvents])
+
+  function tilt(e) {
+    if (reduced()) return
+    const el = e.currentTarget
+    const r = el.getBoundingClientRect()
+    const px = (e.clientX - r.left) / r.width - 0.5
+    const py = (e.clientY - r.top) / r.height - 0.5
+    gsap.to(el, { rotateY: px * 8, rotateX: -py * 8, transformPerspective: 800, duration: 0.35, ease: 'power2.out' })
+  }
+  function untilt(e) {
+    gsap.to(e.currentTarget, { rotateY: 0, rotateX: 0, duration: 0.6, ease: 'elastic.out(1, 0.6)' })
   }
 
   return (
-    <main className="min-h-screen bg-sand px-6 py-24 text-ink md:px-16">
-      <Link href="/" className="text-sm text-ink/50 transition-colors hover:text-ink">
-        ← Back to QPIE
-      </Link>
+    <main className="relative min-h-screen overflow-hidden bg-sand px-6 py-24 text-ink md:px-16">
+      <div className="pointer-events-none absolute -right-40 -top-40 h-[28rem] w-[28rem] rounded-full bg-coral/20 blur-3xl" />
+      <div className="pointer-events-none absolute -left-32 top-1/3 h-96 w-96 rounded-full bg-ocean/15 blur-3xl" />
 
-      <h1 className="mt-6 font-display text-4xl font-black tracking-tight md:text-5xl">Book My Show</h1>
-      <p className="mt-3 text-ink/50">Pick a show, choose your seats, pay with Razorpay.</p>
+      <div className="relative">
+        <Link href="/" className="text-sm text-ink/50 transition-colors hover:text-ink">
+          ← Back to QPIE
+        </Link>
 
-      {!authLoading && !user && (
-        <p className="mt-6 inline-block rounded-xl border border-ocean/30 bg-ocean/10 px-4 py-3 text-sm text-ocean">
-          <Link href="/login?next=/bookshow" className="underline">Sign in</Link> to hold seats and get your ticket code.
-        </p>
-      )}
-
-      <div className="mt-12 grid grid-cols-1 gap-10 md:grid-cols-[2fr_1fr]">
-        <div className="space-y-4">
-          {loadingEvents && <p className="text-sm text-ink/40">Loading shows…</p>}
-
-          {!loadingEvents && events.length === 0 && (
-            <div className="rounded-2xl border border-dashed border-coral/20 p-12 text-center text-sm text-ink/40">
-              No shows are on sale right now. Check back soon.
-            </div>
-          )}
-
-          {events.map((event) => {
-            const soldOut = event.availableSeats <= 0
-            const selected = selectedId === event._id
-
-            return (
-              <button
-                key={event._id}
-                onClick={() => {
-                  setSelectedId(event._id)
-                  setSeats(1)
-                }}
-                disabled={soldOut}
-                className={`glass-card w-full rounded-2xl border-l-4 p-6 text-left transition-transform duration-300 ease-spring hover:-translate-y-1 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 ${
-                  selected ? 'border-coral' : 'border-coral/10'
-                }`}
-              >
-                <span className="text-xs text-ocean">{formatDate(event.date)}</span>
-                <h2 className="mt-1 font-display text-xl font-semibold">{event.title}</h2>
-                <p className="mt-1 text-sm text-ink/50">{event.venue}</p>
-                <p className="mt-3 text-sm text-ink/80">
-                  ₹{event.pricePerSeat} per seat · {soldOut ? 'Sold out' : `${event.availableSeats} left`}
-                </p>
-              </button>
-            )
-          })}
+        <div ref={headerRef} className="mt-6">
+          <h1 className="font-display text-5xl font-black tracking-tight md:text-7xl">
+            <span className="block overflow-hidden"><span className="hdr-line block">Book</span></span>
+            <span className="block overflow-hidden"><span className="hdr-line block text-coral">my show.</span></span>
+          </h1>
+          <p className="hdr-sub mt-4 max-w-xl text-ink/60">
+            Pick your city, pick your show, pick your exact seats. Live seat map — nobody can take your seat once you hold it.
+          </p>
         </div>
 
-        <div className="glass-card h-fit rounded-2xl p-6">
-          <h2 className="font-display text-lg font-semibold">Your order</h2>
+        <section className="mt-12">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-ink/40">1 · Your city</p>
+          {loadingCities && <div className="h-14 w-72 animate-pulse rounded-full bg-white/60" />}
+          {!loadingCities && cities.length === 0 && !error && (
+            <p className="text-sm text-ink/50">No shows are on sale right now. Check back soon.</p>
+          )}
+          {cities.length > 0 && <CityPicker cities={cities} value={city} onChange={setCity} />}
+        </section>
 
-          {!selectedEvent ? (
-            <p className="mt-6 text-sm text-ink/40">Choose a show to continue.</p>
-          ) : (
-            <>
-              <p className="mt-2 text-sm text-ink/50">{selectedEvent.title}</p>
+        {error && <p role="alert" className="mt-6 text-sm text-coral">{error}</p>}
 
-              <label htmlFor="seats" className="mt-6 block text-sm text-ink/60">Seats</label>
-              <input
-                id="seats"
-                type="number"
-                min={1}
-                max={maxSeats}
-                value={seats}
-                onChange={(e) => {
-                  const next = Number(e.target.value)
-                  setSeats(Math.min(Math.max(1, Number.isFinite(next) ? next : 1), maxSeats))
-                }}
-                className="mt-2 w-full rounded-xl border border-coral/20 bg-white px-4 py-3 text-ink outline-none transition-colors focus:border-coral"
-              />
-              <p className="mt-2 text-xs text-ink/40">Up to {maxSeats} per booking.</p>
+        {city && (
+          <section className="mt-14">
+            <p className="mb-5 text-xs font-semibold uppercase tracking-[0.25em] text-ink/40">2 · Shows in {city}</p>
 
-              <div className="mt-6 flex items-center justify-between border-t border-coral/15 pt-4">
-                <span className="text-ink/60">Total</span>
-                <span className="font-display text-xl font-semibold">₹{totalAmount}</span>
+            {loadingEvents && (
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-96 animate-pulse rounded-3xl bg-white/60" />
+                ))}
               </div>
+            )}
 
-              <button
-                onClick={handlePay}
-                disabled={status === 'processing' || selectedEvent.availableSeats <= 0}
-                className="mt-6 w-full rounded-full bg-coral py-3.5 text-sm font-semibold text-white shadow-glow-coral transition-transform duration-300 ease-spring hover:-translate-y-0.5 disabled:opacity-50"
-              >
-                {status === 'processing' ? 'Opening payment…' : user ? 'Pay and book' : 'Sign in to book'}
-              </button>
-            </>
-          )}
+            {!loadingEvents && events.length === 0 && (
+              <div className="rounded-3xl border border-dashed border-coral/20 p-14 text-center text-sm text-ink/40">
+                No upcoming shows in {city} yet.
+              </div>
+            )}
 
-          {message && (
-            <p role="alert" className="mt-4 text-sm text-red-300">{message}</p>
-          )}
-        </div>
+            <div ref={gridRef} className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {!loadingEvents &&
+                events.map((event) => {
+                  const soldOut = event.availableSeats <= 0
+                  const accent = ACCENT[event.accentColor] || ACCENT.pink
+                  return (
+                    <article
+                      key={event._id}
+                      onMouseMove={tilt}
+                      onMouseLeave={untilt}
+                      className="show-card glass-card group relative overflow-hidden rounded-3xl"
+                      style={{ boxShadow: `0 24px 60px -28px ${accent}` }}
+                    >
+                      <div className="relative h-48 overflow-hidden bg-ink/5">
+                        {event.posterImage && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={event.posterImage}
+                            alt=""
+                            loading="lazy"
+                            onError={(e) => (e.currentTarget.style.display = 'none')}
+                            className="h-full w-full object-cover transition-transform duration-700 ease-spring group-hover:scale-110"
+                          />
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-ink/60 via-transparent to-transparent" />
+                        <span
+                          className="absolute left-4 top-4 rounded-full px-3 py-1 text-xs font-bold text-white"
+                          style={{ background: accent }}
+                        >
+                          {event.category}
+                        </span>
+                        <span className="absolute bottom-4 right-4 rounded-full bg-white/90 px-3 py-1 text-sm font-bold text-ink">
+                          ₹{event.pricePerSeat}
+                        </span>
+                      </div>
+
+                      <div className="p-6">
+                        <p className="text-xs font-semibold text-ocean">{formatDate(event.date)}</p>
+                        <h2 className="mt-1 font-display text-2xl font-black tracking-tight">{event.title}</h2>
+                        <p className="mt-1 text-sm text-ink/50">{event.venue}</p>
+                        {event.description && <p className="mt-3 line-clamp-2 text-sm text-ink/60">{event.description}</p>}
+
+                        <div className="mt-6 flex items-center justify-between">
+                          <span className="text-xs text-ink/40">
+                            {soldOut ? 'Sold out' : `${event.availableSeats} of ${event.totalSeats} seats left`}
+                          </span>
+                          <button
+                            onClick={() => setActive(event)}
+                            disabled={soldOut}
+                            className="rounded-full bg-coral px-6 py-3 text-sm font-bold text-white shadow-glow-coral transition-transform duration-300 ease-spring hover:-translate-y-0.5 disabled:opacity-40 disabled:hover:translate-y-0"
+                          >
+                            Select seats →
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
+            </div>
+          </section>
+        )}
       </div>
+
+      {active && (
+        <SeatSheet
+          key={active._id}
+          event={active}
+          onClose={() => {
+            setActive(null)
+            // refresh list counters (served from the 30s cache)
+            fetch(`/api/v1/events?city=${encodeURIComponent(city)}&upcoming=true`)
+              .then((r) => r.json())
+              .then((list) => Array.isArray(list) && setEvents(list.filter((e) => e.pricePerSeat > 0)))
+              .catch(() => {})
+          }}
+        />
+      )}
     </main>
   )
 }
