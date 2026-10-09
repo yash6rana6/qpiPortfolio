@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import gsap from 'gsap'
-import { ScrollTrigger } from 'gsap/ScrollTrigger'
-
-gsap.registerPlugin(ScrollTrigger)
+import { useEffect, useRef } from 'react'
+import Link from 'next/link'
+import { gsap } from '../lib/motion.js'
+import { useEvents } from '../lib/hooks.js'
+import { formatDate, posterBackground } from '../lib/utils.js'
 
 // Summer accents — same accentColor names stored in the DB, brighter hexes.
 const ACCENT = {
@@ -13,27 +13,6 @@ const ACCENT = {
   amber: { hex: '#FFB627', shadow: 'rgba(255, 182, 39, 0.35)' },  // mango
   lime: { hex: '#1FAE8E', shadow: 'rgba(31, 174, 142, 0.35)' }    // palm
 }
-
-const FALLBACK_RECENT = [
-  {
-    _id: 'r1',
-    title: 'Neon Vice Festival',
-    date: '2026-11-14',
-    venue: 'Crypto.com Arena, LA',
-    description: 'A three-night electronic music takeover with a fully synced pink-and-violet light rig.',
-    videoUrl: 'https://videos.pexels.com/video-files/12695733/12695733-hd_1920_1080_24fps.mp4',
-    accentColor: 'pink'
-  },
-  {
-    _id: 'r2',
-    title: 'Sunburst Circuit Night',
-    date: '2026-10-02',
-    venue: 'Sahara Tent, Coachella',
-    description: 'Late-night set with cyan strobe walls timed to the drop, streamed live to 40k viewers.',
-    videoUrl: 'https://videos.pexels.com/video-files/12695733/12695733-hd_1920_1080_24fps.mp4',
-    accentColor: 'cyan'
-  },
-]
 
 function DetailCard({ event, accent, slide }) {
   return (
@@ -46,7 +25,7 @@ function DetailCard({ event, accent, slide }) {
       }}
     >
       <span className="text-xs font-bold uppercase tracking-wider text-black/70">
-        {new Date(event.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+        {formatDate(event.date)}
       </span>
       <h3 className="mt-3 font-display text-4xl font-black leading-[0.95] text-black md:text-6xl">
         {event.title}
@@ -55,14 +34,14 @@ function DetailCard({ event, accent, slide }) {
       <p className="mt-6 text-base leading-relaxed text-black/85 md:text-lg">
         {event.description}
       </p>
-      <button className="group mt-8 inline-flex items-center gap-2">
+      <Link href={`/events/${event._id}`} className="group mt-8 inline-flex items-center gap-2">
         <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-black text-lg text-white transition-transform duration-300 group-hover:scale-110">
           ↗
         </span>
         <span className="rounded-xl bg-black px-6 py-3.5 text-sm font-extrabold uppercase tracking-wide text-white transition-all duration-300 group-hover:bg-zinc-900">
           View event
         </span>
-      </button>
+      </Link>
     </div>
   )
 }
@@ -71,39 +50,35 @@ function OvalVideo({ event, accent, slide }) {
   return (
     <div
       data-slide={slide}
-      className="parallax-video will-change-transform overflow-hidden rounded-full ring-1 ring-white/10"
+      className="will-change-transform overflow-hidden rounded-full ring-1 ring-white/10"
       style={{
         aspectRatio: '1 / 1',
         boxShadow: `0 25px 60px ${accent.shadow}`
       }}
     >
-      <video
-        className="h-full w-full object-cover scale-105 transition-transform duration-700 hover:scale-100"
-        src={event.videoUrl}
-        autoPlay
-        muted
-        loop
-        playsInline
-      />
+      {event.videoUrl ? (
+        <video
+          className="h-full w-full object-cover scale-105 transition-transform duration-700 hover:scale-100"
+          src={event.videoUrl}
+          autoPlay
+          muted
+          loop
+          playsInline
+        />
+      ) : (
+        <div className="h-full w-full bg-cover bg-center" style={posterBackground(event.posterImage)} />
+      )}
     </div>
   )
 }
 
 export default function RecentEvents() {
-  const [events, setEvents] = useState(FALLBACK_RECENT)
+  const { events } = useEvents({ recent: true, limit: 3 })
   const sectionRef = useRef(null)
   const titleRef = useRef(null)
 
   useEffect(() => {
-    fetch('/api/v1/events?recent=true')
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) setEvents(data.slice(0, 3))
-      })
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
+    if (!sectionRef.current || !titleRef.current) return
     const ctx = gsap.context(() => {
       // 1. Center Title Smooth Fade In & Zoom
       gsap.fromTo(
@@ -167,30 +142,16 @@ export default function RecentEvents() {
             }
           )
         }
-
-        // Parallax — the round video drifts at a different rate than its text
-        // card as the row scrolls through the viewport.
-        const videoEl = row.querySelector('.parallax-video')
-        if (videoEl) {
-          gsap.to(videoEl, {
-            yPercent: -18,
-            ease: 'none',
-            scrollTrigger: {
-              trigger: row,
-              start: 'top bottom',
-              end: 'bottom top',
-              scrub: true
-            }
-          })
-        }
       })
     }, sectionRef)
 
     return () => ctx.revert()
   }, [events])
 
+  if (events.length === 0) return null
+
   return (
-    <section id="recent-events" ref={sectionRef} className="relative z-10 bg-sand-deep px-6 py-32 md:px-16 overflow-hidden">
+    <section id="recent-events" ref={sectionRef} className="relative z-10 bg-gradient-to-r from-slate-900 to-fuchsia-600 px-6 py-32 md:px-16 overflow-hidden">
       
       {/* Centered Massive Glow Heading */}
       <div className="mb-24 text-center">

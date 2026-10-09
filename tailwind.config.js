@@ -19,7 +19,8 @@ module.exports = {
         ocean: '#00B4D8',
         palm: '#1FAE8E',
         papaya: '#FF9F1C',
-        ink: '#2B1B12'
+        ink: '#2B1B12',
+        plum: '#3D1A5B'
       },
       fontFamily: {
         display: ['"Neue Montreal"', '"Helvetica Neue"', 'Arial', 'sans-serif'],

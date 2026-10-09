@@ -6,22 +6,12 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '../../components/AuthProvider.jsx'
 
 const STATUS_STYLE = {
-  paid: 'border-palm/40 bg-palm/10 text-palm',
-  created: 'border-mango/50 bg-mango/10 text-papaya',
-  processing: 'border-mango/50 bg-mango/10 text-papaya',
-  expired: 'border-ink/15 bg-ink/5 text-ink/50',
-  failed: 'border-coral/40 bg-coral/10 text-coral',
-  refunded: 'border-ocean/40 bg-ocean/10 text-ocean'
+  paid: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
+  created: 'border-amber-400/30 bg-amber-400/10 text-amber-300',
+  failed: 'border-red-400/30 bg-red-400/10 text-red-300'
 }
 
-const STATUS_LABEL = {
-  paid: 'Confirmed',
-  created: 'Payment pending',
-  processing: 'Confirming…',
-  expired: 'Expired',
-  failed: 'Refund in progress',
-  refunded: 'Refunded'
-}
+const STATUS_LABEL = { paid: 'Confirmed', created: 'Payment pending', failed: 'Payment failed' }
 
 export default function BookingsPage() {
   const { user, loading: authLoading } = useAuth()
@@ -64,7 +54,7 @@ export default function BookingsPage() {
           <div className="rounded-2xl border border-dashed border-coral/20 p-12 text-center">
             <p className="text-sm text-ink/50">You haven&apos;t booked a show yet.</p>
             <Link
-              href="/bookshow"
+              href="/events"
               className="mt-6 inline-block rounded-full bg-coral px-6 py-3 text-sm font-semibold text-white shadow-glow-coral"
             >
               Browse shows
@@ -79,22 +69,10 @@ export default function BookingsPage() {
                 <h2 className="font-display text-xl font-semibold">
                   {booking.event?.title || 'Event removed'}
                 </h2>
-                <p className="mt-1 text-sm text-ink/50">
-                  {booking.event?.venue}
-                  {booking.event?.city ? ` · ${booking.event.city}` : ''}
-                </p>
+                <p className="mt-1 text-sm text-ink/50">{booking.event?.venue}</p>
                 <p className="mt-3 text-sm text-ink/70">
-                  {booking.seats} seat{booking.seats > 1 ? 's' : ''} · ₹{booking.amount}
+                  {booking.seatNumbers?.length ? booking.seatNumbers.join(', ') : `${booking.seats} seat${booking.seats > 1 ? 's' : ''}`} · ₹{booking.amount}
                 </p>
-                {booking.seatIds?.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {booking.seatIds.map((id) => (
-                      <span key={id} className="rounded-md bg-coral/10 px-2 py-1 text-xs font-bold text-coral">
-                        {id}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
 
               <span
@@ -112,8 +90,8 @@ export default function BookingsPage() {
               </p>
             )}
 
-            {(booking.status === 'failed' || booking.status === 'refunded') && booking.failureReason && (
-              <p className="mt-4 text-sm text-coral">{booking.failureReason}</p>
+            {booking.status === 'failed' && booking.failureReason && (
+              <p className="mt-4 text-sm text-red-300">{booking.failureReason}</p>
             )}
           </article>
         ))}

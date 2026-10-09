@@ -2,6 +2,7 @@
 // instrumentation-node.js so the edge bundle never tries to compile it.
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    await import('./instrumentation-node')
+    const { startWorker } = await import('./lib/worker')
+    startWorker()
   }
 }

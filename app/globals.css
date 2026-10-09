@@ -72,3 +72,17 @@ html, body {
 }
 
 .eq-bar { animation: eq-bar 1.1s ease-in-out infinite; transform-origin: bottom; }
+
+/* ---- About page ---- */
+
+@keyframes marquee {
+  to { transform: translateX(-50%); }
+}
+.animate-marquee { animation: marquee 28s linear infinite; }
+
+/* Text that reads as ink on sand and flips to white over the black crawling shape.
+   Must NOT sit inside a transformed / opacity-animated ancestor (that isolates the blend). */
+.blend-ink { color: #fff; mix-blend-mode: difference; }
+.blend-ink-soft { color: rgba(255, 255, 255, 0.72); mix-blend-mode: difference; }
+/* coral on sand (difference of sand and this = #FF6B5B) */
+.blend-coral { color: rgb(0, 139, 141); mix-blend-mode: difference; }

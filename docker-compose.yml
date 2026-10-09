@@ -1,15 +1,36 @@
-# Free local Redis with disk persistence (AOF) so holds + booked seats survive a restart.
+# Local Redis with disk persistence (AOF)
+# Holds + booked seats survive Redis/container restart.
+#
+# Start:
 #   docker compose up -d redis
+
 services:
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - qpiepass
+
     ports:
       - "6379:6379"
-      - "8001:8001"
+
     volumes:
       - redis-data:/data
+
     restart: unless-stopped
 
 volumes:
   redis-data:
+
+
+  
