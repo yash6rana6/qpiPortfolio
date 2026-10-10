@@ -11,11 +11,26 @@ const BookingSchema = new mongoose.Schema(
     pricePerSeat: { type: Number, required: true, min: 0 },
     amount: { type: Number, required: true, min: 0 },
 
-    status: { type: String, enum: ['created', 'paid', 'failed'], default: 'created', index: true },
-    bookingCode: { type: String, index: true, sparse: true },
+    // created    -> seats held (Redis), waiting for payment
+    // processing -> payment verified, writing seats (short-lived claim)
+    // paid       -> ticket issued
+    // expired    -> hold ran out / checkout closed (a late payment is still honoured if the seats are free)
+    // failed     -> paid but the seats were lost; refund queued
+    // refunded   -> refund issued
+    status: {
+      type: String,
+      enum: ['created', 'processing', 'paid', 'expired', 'failed', 'refunded'],
+      default: 'created',
+      index: true
+    },
+    bookingCode: { type: String, unique: true, sparse: true },
+
+    holdId: String,
+    holdExpiresAt: Date,
 
     razorpayOrderId: { type: String, required: true, unique: true },
     razorpayPaymentId: String,
+    refundId: String,
     failureReason: String
   },
   { timestamps: true }

@@ -1,4 +1,4 @@
-import { getEventLite, channelFor } from '../../../../../../lib/seats'
+import { getEventLite, channelFor } from '../../../../../../lib/seatStore'
 import { subscribe } from '../../../../../../lib/pubsub'
 import { fail, ApiError } from '../../../../../../lib/api'
 

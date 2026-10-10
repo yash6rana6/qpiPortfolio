@@ -1,9 +1,10 @@
 import Link from 'next/link'
+import Suggestions from '../Suggestions.jsx'
 
-export default function BookingConfirmed({ code, seats = [], onAnother }) {
+export default function BookingConfirmed({ code, seats = [], eventId, city, onAnother }) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-sand px-6 text-ink">
-      <div className="w-full max-w-md text-center">
+      <div className="w-full max-w-md py-12 text-center">
         <p className="font-display text-sm font-semibold text-ocean">Payment confirmed</p>
         <h1 className="mt-4 font-display text-5xl font-black uppercase tracking-tight">You&apos;re going.</h1>
         <p className="mt-4 text-sm text-ink/60">Show this code at the venue entrance.</p>
@@ -22,6 +23,10 @@ export default function BookingConfirmed({ code, seats = [], onAnother }) {
           <button onClick={onAnother} className="text-sm text-ink/50 hover:text-ink">
             Book another show
           </button>
+        </div>
+
+        <div className="mt-12">
+          <Suggestions title="Going out again?" eventId={eventId} city={city} />
         </div>
       </div>
     </main>

@@ -80,6 +80,10 @@ function BookShow() {
       seatNumbers: mapped ? selected : undefined,
       user,
       onPaid: (result) => {
+        if (result.status !== 'paid' || !result.bookingCode) {
+          router.push('/bookings') // the webhook is finishing it; the ticket shows up there
+          return
+        }
         setConfirmation(result)
         setStatus('confirmed')
         setSelected([])
@@ -105,6 +109,8 @@ function BookShow() {
       <BookingConfirmed
         code={confirmation.bookingCode}
         seats={confirmation.seatNumbers || []}
+        eventId={eventId}
+        city={event?.city}
         onAnother={() => router.push('/events')}
       />
     )

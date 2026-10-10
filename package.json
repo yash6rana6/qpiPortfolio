@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "test:concurrency": "node scripts/test-concurrency.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -22,7 +23,8 @@
     "nodemailer": "^10.0.16",
     "razorpay": "^2.9.4",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "google-auth-library": "^9.14.1"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.19",

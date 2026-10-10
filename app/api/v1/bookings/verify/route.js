@@ -1,20 +1,18 @@
-import crypto from 'crypto'
 import { connectDB } from '../../../../../lib/mongodb'
-import Event from '../../../../../models/Event'
 import Booking from '../../../../../models/Booking'
 import { requireUser } from '../../../../../lib/auth'
 import { isValidSignature } from '../../../../../lib/razorpay'
+import { confirmPayment } from '../../../../../lib/bookingService'
 import { ok, fail, readJson, requireFields, ApiError } from '../../../../../lib/api'
 
 export const dynamic = 'force-dynamic'
 
-function makeBookingCode() {
-  return `QP${crypto.randomBytes(4).toString('hex').toUpperCase()}`
-}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /**
- * Confirm a payment. Nothing is trusted from the browser here except the three
- * Razorpay ids — and those only count once the HMAC signature checks out.
+ * Confirm a payment. Nothing is trusted from the browser except the three Razorpay
+ * ids, and those only count once the HMAC signature checks out. The real work
+ * (claim, write seats, refund if lost) is confirmPayment(), shared with the webhook.
  */
 export async function POST(request) {
   try {
@@ -24,57 +22,39 @@ export async function POST(request) {
     const body = await readJson(request)
     requireFields(body, ['razorpay_order_id', 'razorpay_payment_id', 'razorpay_signature'])
 
-    const booking = await Booking.findOne({
-      razorpayOrderId: body.razorpay_order_id,
-      user: session.sub
-    })
-    if (!booking) throw new ApiError(404, 'Booking not found')
-
-    // Idempotent — Razorpay's handler can fire more than once.
-    if (booking.status === 'paid') {
-      return ok({ bookingId: booking._id, bookingCode: booking.bookingCode, status: 'paid', seatNumbers: booking.seatNumbers })
-    }
-
     const valid = isValidSignature({
       orderId: body.razorpay_order_id,
       paymentId: body.razorpay_payment_id,
       signature: body.razorpay_signature
     })
+    if (!valid) throw new ApiError(400, 'Payment could not be verified')
 
-    if (!valid) {
-      booking.status = 'failed'
-      booking.failureReason = 'Signature verification failed'
-      await booking.save()
-      throw new ApiError(400, 'Payment could not be verified')
+    let result = await confirmPayment({
+      orderId: body.razorpay_order_id,
+      paymentId: body.razorpay_payment_id,
+      userId: session.sub
+    })
+
+    // The webhook may be finishing this very booking: give it a moment.
+    for (let i = 0; i < 8 && result.status === 'processing'; i++) {
+      await sleep(400)
+      const fresh = await Booking.findById(result.bookingId).lean()
+      result = { ...result, status: fresh.status, bookingCode: fresh.bookingCode, seatNumbers: fresh.seatNumbers }
     }
 
-    // Atomic seat decrement — the guard in the filter means two people paying
-    // for the last seat at the same time can't both succeed.
-    // For named seats the same filter also requires every chosen seat to still be free.
-    const seatNumbers = booking.seatNumbers || []
-    const filter = { _id: booking.event, availableSeats: { $gte: booking.seats } }
-    if (seatNumbers.length) filter.bookedSeats = { $nin: seatNumbers }
-
-    const updated = await Event.findOneAndUpdate(
-      filter,
-      { $inc: { availableSeats: -booking.seats }, $addToSet: { bookedSeats: { $each: seatNumbers } } },
-      { new: true }
-    )
-
-    if (!updated) {
-      booking.status = 'failed'
-      booking.razorpayPaymentId = body.razorpay_payment_id
-      booking.failureReason = 'Seats were taken before payment was confirmed'
-      await booking.save()
-      throw new ApiError(409, 'Those seats were taken before your payment went through — a refund will be issued')
+    if (result.status === 'failed' || result.status === 'refunded') {
+      throw new ApiError(
+        409,
+        'Those seats were taken just before your payment went through. Your money is being refunded automatically.'
+      )
     }
 
-    booking.status = 'paid'
-    booking.razorpayPaymentId = body.razorpay_payment_id
-    booking.bookingCode = makeBookingCode()
-    await booking.save()
-
-    return ok({ bookingId: booking._id, bookingCode: booking.bookingCode, status: 'paid', seatNumbers })
+    return ok({
+      bookingId: result.bookingId,
+      bookingCode: result.bookingCode || null,
+      status: result.status,
+      seatNumbers: result.seatNumbers || []
+    })
   } catch (err) {
     return fail(err)
   }

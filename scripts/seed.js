@@ -24,6 +24,7 @@ const UserSchema = new mongoose.Schema(
     email: { type: String, unique: true, lowercase: true },
     phone: String,
     passwordHash: String,
+    emailVerified: { type: Boolean, default: false },
     role: { type: String, enum: ['user', 'admin'], default: 'user' }
   },
   { timestamps: true }
@@ -109,6 +110,7 @@ async function run() {
 
   if (existing) {
     existing.role = 'admin'
+    existing.emailVerified = true
     await existing.save()
     console.log(`Admin already existed, role confirmed: ${email}`)
   } else {
@@ -116,6 +118,7 @@ async function run() {
       name: SEED_ADMIN_NAME || 'Admin',
       email,
       passwordHash: await bcrypt.hash(SEED_ADMIN_PASSWORD, 10),
+      emailVerified: true,
       role: 'admin'
     })
     console.log(`Admin created: ${email}`)

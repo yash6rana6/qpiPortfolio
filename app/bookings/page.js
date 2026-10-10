@@ -4,14 +4,23 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '../../components/AuthProvider.jsx'
+import Suggestions from '../../components/Suggestions.jsx'
 
 const STATUS_STYLE = {
   paid: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
   created: 'border-amber-400/30 bg-amber-400/10 text-amber-300',
+  processing: 'border-sky-400/30 bg-sky-400/10 text-sky-300',
+  refunded: 'border-slate-400/30 bg-slate-400/10 text-slate-300',
   failed: 'border-red-400/30 bg-red-400/10 text-red-300'
 }
 
-const STATUS_LABEL = { paid: 'Confirmed', created: 'Payment pending', failed: 'Payment failed' }
+const STATUS_LABEL = {
+  paid: 'Confirmed',
+  created: 'Payment pending',
+  processing: 'Confirming payment',
+  refunded: 'Refunded',
+  failed: 'Payment failed'
+}
 
 export default function BookingsPage() {
   const { user, loading: authLoading } = useAuth()
@@ -37,6 +46,8 @@ export default function BookingsPage() {
   if (authLoading || !user) {
     return <main className="min-h-screen bg-sand" />
   }
+
+  const lastPaid = bookings.find((b) => b.status === 'paid')
 
   return (
     <main className="min-h-screen bg-sand px-6 py-24 text-ink md:px-16">
@@ -96,6 +107,17 @@ export default function BookingsPage() {
           </article>
         ))}
       </div>
+
+      {!loading && (
+        <div className="mt-12 max-w-3xl">
+          <Suggestions
+            title={lastPaid ? 'Recommended for you' : 'Popular right now'}
+            eventId={lastPaid?.event?._id}
+            city={lastPaid?.event?.city}
+            layout="grid"
+          />
+        </div>
+      )}
     </main>
   )
 }
