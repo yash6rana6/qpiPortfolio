@@ -28,12 +28,10 @@ function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  // Only same-site paths are allowed, so /login?next=https://evil.com can't redirect off-site.
   const rawNext = searchParams.get('next')
   const next = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/events'
   const wantsVerify = searchParams.get('verify') === '1'
 
-  // register | login | verify | reset
   const [mode, setMode] = useState('register')
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: '' })
   const [code, setCode] = useState('')
@@ -46,7 +44,6 @@ function LoginForm() {
   const emailRef = useRef(null)
   const autoSent = useRef(false)
 
-  // Email we are verifying / resetting for (never asked again at those steps).
   const typedEmail = form.email.trim()
   const knownEmail = mode === 'verify' ? (user?.email || typedEmail) : (typedEmail || user?.email || '')
 
@@ -72,7 +69,6 @@ function LoginForm() {
     }
   }, [])
 
-  // Sent here from the booking page with an unverified account: go straight to the code step.
   useEffect(() => {
     if (authLoading || !wantsVerify || autoSent.current) return
     if (user && !user.emailVerified) {
@@ -84,7 +80,6 @@ function LoginForm() {
     }
   }, [authLoading, wantsVerify, user, next, router, sendVerifyCode])
 
-  // ---- Google ----
   const handleGoogle = useCallback(
     async (response) => {
       setError('')
@@ -181,8 +176,6 @@ function LoginForm() {
     }
   }
 
-  // "Forgot password?": the code goes to the account's registered email. We reuse the
-  // email already typed above (or the signed-in account's) and never ask for it again.
   async function startForgot() {
     setError('')
     setInfo('')
@@ -243,23 +236,31 @@ function LoginForm() {
   const showEmailField = mode === 'login' || mode === 'register'
 
   return (
-    // Form right side pe hai (justify-end)
     <main className="relative flex min-h-screen w-full items-center justify-end bg-[#0d060e] p-4 lg:p-8">
-      {/* Full Screen Background Image */}
       <div
         className="absolute inset-0 z-0 bg-cover bg-center"
         style={{ backgroundImage: `url('/signupForm.png')` }}
       />
 
-      {/* Right side pe halka sa dark gradient for readability */}
       <div className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-transparent to-[#150711]/50" />
 
-      {/* Glassmorphism Card - Chota size (max-w-md) */}
       <div className="relative z-10 w-full max-w-md rounded-[1.5rem] border border-white/10 bg-white/5 p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] backdrop-blur-2xl lg:mr-12 lg:p-8">
-        {/* Header Text - Name changed to QPIE */}
         <div className="mb-6 text-center">
-          <h1 className="font-serif text-3xl leading-tight text-white mb-2 lg:text-4xl">
-            {mode === 'verify' ? 'Verify your email' : mode === 'reset' ? 'Reset password' : 'Welcome to QPIE'}
+          <h1 className="mb-2 flex flex-wrap items-center justify-center gap-1.5 font-serif text-3xl leading-none text-white lg:text-4xl">
+            {mode === 'verify' ? (
+              'Verify your email'
+            ) : mode === 'reset' ? (
+              'Reset password'
+            ) : (
+              <>
+                <span>Welcome to</span>
+                <img
+                  src="/logo.svg"
+                  alt="QPIE"
+                  className="h-9 w-auto translate-y-[1px] object-contain lg:h-11"
+                />
+              </>
+            )}
           </h1>
           <p className="text-xs text-white/80">{subtitle}</p>
         </div>
@@ -275,7 +276,6 @@ function LoginForm() {
           </div>
         )}
 
-        {/* Form - Reduced spacing */}
         <form onSubmit={handleSubmit} className="space-y-5">
           {mode === 'register' && (
             <div>
@@ -350,7 +350,6 @@ function LoginForm() {
                   className={inputClass}
                   placeholder="Enter your password"
                 />
-                {/* Eye Icon */}
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 cursor-pointer text-white/40 hover:text-white">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
@@ -425,9 +424,13 @@ function LoginForm() {
             </button>
           )}
 
-          <div className="block">
-            <Link href="/" className="text-[11px] text-white/40 transition-colors hover:text-white/80">
-              ← Back to QPIE
+          <div className="flex justify-center">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-1 text-[11px] text-white/40 transition-colors hover:text-white/80"
+            >
+              <span>← Back to</span>
+              <img src="/logo.svg" alt="QPIE" className="h-4 w-auto translate-y-[0.5px] object-contain opacity-60" />
             </Link>
           </div>
         </div>

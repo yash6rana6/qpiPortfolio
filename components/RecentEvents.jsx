@@ -6,7 +6,6 @@ import { gsap } from '../lib/motion.js'
 import { useEvents } from '../lib/hooks.js'
 import { formatDate, posterBackground } from '../lib/utils.js'
 
-// Summer accents — same accentColor names stored in the DB, brighter hexes.
 const ACCENT = {
   pink: { hex: '#FF6B5B', shadow: 'rgba(255, 107, 91, 0.35)' },   // coral
   cyan: { hex: '#00B4D8', shadow: 'rgba(0, 180, 216, 0.35)' },    // ocean
@@ -24,14 +23,14 @@ function DetailCard({ event, accent, slide }) {
         boxShadow: `0 20px 50px ${accent.shadow}`
       }}
     >
-      <span className="text-xs font-bold uppercase tracking-wider text-black/70">
+      <span className="text-xs font-bold uppercase tracking-wider text-white/80">
         {formatDate(event.date)}
       </span>
-      <h3 className="mt-3 font-display text-4xl font-black leading-[0.95] text-black md:text-6xl">
+      <h3 className="mt-3 font-display text-4xl font-black leading-[0.95] text-white drop-shadow-sm md:text-6xl">
         {event.title}
       </h3>
-      <p className="mt-3 text-sm font-semibold text-black/70 md:text-base">{event.venue}</p>
-      <p className="mt-6 text-base leading-relaxed text-black/85 md:text-lg">
+      <p className="mt-3 text-sm font-semibold text-white/80 md:text-base">{event.venue}</p>
+      <p className="mt-6 text-base leading-relaxed text-white/90 md:text-lg">
         {event.description}
       </p>
       <Link href={`/events/${event._id}`} className="group mt-8 inline-flex items-center gap-2">
@@ -157,9 +156,9 @@ export default function RecentEvents() {
       <div className="mb-24 text-center">
         <h2
           ref={titleRef}
-          className="select-none font-display text-[8vw] font-black tracking-tight text-ink uppercase md:text-[6vw]"
+          className="select-none font-display text-[8vw] font-black tracking-tight text-white uppercase drop-shadow-lg md:text-[6vw]"
         >
-          Recent <span className="text-coral filter drop-shadow-[0_0_20px_rgba(255,107,91,0.35)]">Events</span>
+          Recent <span className="text-white filter drop-shadow-[0_0_25px_rgba(255,255,255,0.45)]">Events</span>
         </h2>
       </div>
 

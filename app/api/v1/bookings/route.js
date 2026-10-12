@@ -37,16 +37,6 @@ export async function GET() {
   }
 }
 
-/**
- * Step 1 of a booking: HOLD the chosen seats, then create the Razorpay order.
- *
- * Body: { eventId, seatNumbers: ["A1","A2"] }   (or { eventId, seats: 3 } for huge count-only shows)
- *
- * The hold is one atomic Redis script: if two people pick the same seat in the same
- * millisecond exactly one wins and the other gets a clean 409 + the seats that were
- * just taken (the UI turns that into "pick another seat"). The client never sends a price.
- * MongoDB's unique (event, seat) index stays the final guard when the payment is confirmed.
- */
 export async function POST(request) {
   let held = null // { eventId, seatIds, holdId }: released if anything below fails
 
