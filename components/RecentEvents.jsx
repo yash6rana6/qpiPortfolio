@@ -71,8 +71,9 @@ function OvalVideo({ event, accent, slide }) {
   )
 }
 
-export default function RecentEvents() {
-  const { events } = useEvents({ recent: true, limit: 3 })
+// limit: how many to show (null = all). standalone: used as the /recent page (shows loading/empty text).
+export default function RecentEvents({ limit = 3, standalone = false }) {
+  const { events, loading } = useEvents({ recent: true, limit })
   const sectionRef = useRef(null)
   const titleRef = useRef(null)
 
@@ -147,7 +148,16 @@ export default function RecentEvents() {
     return () => ctx.revert()
   }, [events])
 
-  if (events.length === 0) return null
+  if (events.length === 0) {
+    if (!standalone) return null
+    return (
+      <section className="flex min-h-screen items-center justify-center bg-gradient-to-r from-slate-900 to-fuchsia-600 px-6 text-center">
+        <p className="font-display text-2xl font-black uppercase text-white/80">
+          {loading ? 'Loading events…' : 'No recent events yet'}
+        </p>
+      </section>
+    )
+  }
 
   return (
     <section id="recent-events" ref={sectionRef} className="relative z-10 bg-gradient-to-r from-slate-900 to-fuchsia-600 px-6 py-32 md:px-16 overflow-hidden">
@@ -191,6 +201,17 @@ export default function RecentEvents() {
           )
         })}
       </div>
+
+      {!standalone && (
+        <div className="mt-20 text-center">
+          <Link
+            href="/recent"
+            className="inline-block rounded-full bg-white px-8 py-3 text-sm font-bold uppercase tracking-widest text-slate-900 transition-transform duration-300 hover:-translate-y-0.5"
+          >
+            View all recent events
+          </Link>
+        </div>
+      )}
     </section>
   )
 }

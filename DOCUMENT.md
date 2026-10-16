@@ -36,7 +36,7 @@ Stack: Next.js 14 (App Router) · MongoDB (Mongoose) · **Redis** (seat lock, ca
 ## 3. Booking flow (step by step)
 
 1. `GET /cities` → cities jinme upcoming show hai (Redis cache, 60s).
-2. `GET /events?city=Delhi&upcoming=true` → shows (Redis cache, 30s).
+2. `GET /events` → shows (city / upcoming / search filtering happens in the browser).
 3. User show kholta hai → `GET /events/:id/seats` (Redis se, ek round trip) + `GET /events/:id/stream` (SSE) shuru.
 4. User seat count chunta hai (1–10), seats tap karta hai (ya **Best available** dabata hai).
 5. **Hold + Pay** → `POST /bookings { eventId, seatIds }`
@@ -153,7 +153,7 @@ Worker `instrumentation-node.js` se same Next process mein start hota hai (free 
 | Method | Route | Access |
 |---|---|---|
 | GET | `/api/v1/cities` | public |
-| GET | `/api/v1/events?city=&upcoming=true&recent=true` | public (cached) |
+| GET | `/api/v1/events?recent=true` | public |
 | GET | `/api/v1/events?all=true` | admin (drafts bhi) |
 | POST / PUT / DELETE | `/api/v1/events[/:id]` | admin |
 | GET | `/api/v1/events/:id/seats` | public — layout + booked + held |

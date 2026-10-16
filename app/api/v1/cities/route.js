@@ -18,10 +18,11 @@ export async function GET() {
             $or: [{ date: null }, { date: { $gte: new Date() } }]
           }
         },
-        { $group: { _id: '$city', shows: { $sum: 1 } } },
+        // Group case-insensitively so "delhi" and "Delhi" count as one city.
+        { $group: { _id: { $toLower: { $trim: { input: '$city' } } }, city: { $first: '$city' }, shows: { $sum: 1 } } },
         { $sort: { shows: -1, _id: 1 } }
       ])
-      return rows.map((r) => ({ city: r._id, shows: r.shows }))
+      return rows.map((r) => ({ city: r.city.trim(), shows: r.shows }))
     })
 
     const res = ok(cities)

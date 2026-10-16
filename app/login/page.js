@@ -219,7 +219,7 @@ function LoginForm() {
 
   const subtitle = {
     login: 'Sign in to continue your journey.',
-    register: 'Sign Up now to get 20% off your next order.',
+    register: 'Create your account to book seats and get your tickets.',
     verify: `Enter the 6-digit code we sent to ${knownEmail || 'your email'}.`,
     reset: `Enter the code sent to ${knownEmail} and choose a new password.`
   }[mode]

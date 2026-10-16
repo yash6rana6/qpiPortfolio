@@ -25,6 +25,9 @@ const BookingSchema = new mongoose.Schema(
     },
     bookingCode: { type: String, unique: true, sparse: true },
 
+    // Set once this booking's seats were subtracted from Event.availableSeats (so a retry can't subtract twice).
+    seatsCounted: { type: Boolean, default: false },
+
     holdId: String,
     holdExpiresAt: Date,
 

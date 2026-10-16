@@ -36,6 +36,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_FORM)
   const [editingId, setEditingId] = useState(null)
+  const [original, setOriginal] = useState(null) // the event as it was when "Edit" was clicked
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -83,6 +84,7 @@ export default function AdminPage() {
 
   function startEdit(event) {
     setEditingId(event._id)
+    setOriginal(event)
     setForm({
       ...EMPTY_FORM,
       ...event,
@@ -95,6 +97,7 @@ export default function AdminPage() {
 
   function resetForm() {
     setEditingId(null)
+    setOriginal(null)
     setForm(EMPTY_FORM)
     setError('')
   }
@@ -113,6 +116,13 @@ export default function AdminPage() {
       endDate: form.endDate ? new Date(form.endDate).toISOString() : null
     }
 
+    // The list on screen can be stale (seats sell while you edit). Only send seat numbers
+    // you actually changed, so saving a typo fix can't overwrite the live seat count.
+    if (editingId && original) {
+      if (payload.totalSeats === Number(original.totalSeats)) delete payload.totalSeats
+      if (payload.availableSeats === Number(original.availableSeats)) delete payload.availableSeats
+    }
+
     try {
       const url = editingId ? `/api/v1/events/${editingId}` : '/api/v1/events'
       const res = await fetch(url, {
@@ -122,6 +132,7 @@ export default function AdminPage() {
       })
       const saved = await res.json()
       if (!res.ok) throw new Error(saved.error || 'Event could not be saved')
+      loadEvents() // pick up the fresh seat counts
 
       setEvents((prev) =>
         editingId ? prev.map((ev) => (ev._id === editingId ? saved : ev)) : [saved, ...prev]
@@ -135,7 +146,7 @@ export default function AdminPage() {
   }
 
   async function handleDelete(id) {
-    if (!window.confirm('Delete this event? Existing bookings will keep their records.')) return
+    if (!window.confirm('Delete this event permanently? (Events with paid bookings cannot be deleted, so untick "Published" to hide those instead.)')) return
 
     try {
       const res = await fetch(`/api/v1/events/${id}`, { method: 'DELETE' })
@@ -197,13 +208,8 @@ export default function AdminPage() {
                   <div className="flex items-center gap-2">
                     <span
                       className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-                        event.accentColor === 'cyan'
-                          ? 'rgba(41, 93, 243, 0.63)'
-                          : event.accentColor === 'amber'
-                          ? ' rgba(232, 57, 117, 0.95)'
-                          : event.accentColor === 'lime'
-                          ? 'rgb(180 255 238)'
-                          : 'bg-[#FF6B5B]'
+                        { pink: 'bg-pink-500', cyan: 'bg-cyan-500', amber: 'bg-amber-500', lime: 'bg-lime-500' }[event.accentColor] ||
+                        'bg-[#FF6B5B]'
                       }`}
                     />
                     <p className="truncate font-display text-base font-extrabold text-zinc-900">

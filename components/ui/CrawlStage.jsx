@@ -6,15 +6,7 @@ import { cn, clamp } from '../../lib/utils.js'
 
 const KEYS = ['x', 'y', 'width', 'height', 'borderRadius', 'rotation']
 
-/**
- * Marks an element the black shape should crawl onto.
- * The plate hugs this element (+ pad) and sits BEHIND it, so give the anchor
- * (or its children) its own background where you don't want black showing.
- * Don't transform/parallax the anchor itself — its rect is measured.
- *   pad    – px the plate extends past the element
- *   radius – plate corner radius (px)
- *   dx/dy  – plate offset (px) for a hard-shadow look
- */
+
 export function CrawlAnchor({
   as: Tag = 'div',
   pad = 24,

@@ -3,6 +3,7 @@ import Footer from '../../components/Footer.jsx'
 import CrawlStage from '../../components/ui/CrawlStage.jsx'
 import AboutHero from '../../components/about/AboutHero.jsx'
 import AboutStory from '../../components/about/AboutStory.jsx'
+import AboutQGroup from '../../components/about/AboutQGroup.jsx'
 import AboutValues from '../../components/about/AboutValues.jsx'
 import AboutTeam from '../../components/about/AboutTeam.jsx'
 import AboutCta from '../../components/about/AboutCta.jsx'
@@ -19,6 +20,7 @@ export default function AboutPage() {
       <CrawlStage>
         <AboutHero />
         <AboutStory />
+        <AboutQGroup />
         <AboutValues />
         <AboutTeam />
         <AboutCta />

@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '../../components/AuthProvider.jsx'
 import BookingHeader from '../../components/booking/BookingHeader.jsx'
@@ -36,6 +36,8 @@ function BookShow() {
   const [status, setStatus] = useState('idle') // idle | processing | confirmed
   const [message, setMessage] = useState('')
   const [confirmation, setConfirmation] = useState(null)
+  // Seats I'm paying for are held by ME, so the live map lists them as taken. Don't treat that as "someone grabbed it".
+  const mySeats = useRef(new Set())
 
   // Booking always starts from an event (events page -> event page -> here).
   useEffect(() => {
@@ -49,7 +51,10 @@ function BookShow() {
 
   // Someone else grabbed a seat I'd picked — drop it.
   useEffect(() => {
-    setSelected((sel) => sel.filter((s) => !taken.includes(s)))
+    setSelected((sel) => {
+      const next = sel.filter((s) => !taken.includes(s) || mySeats.current.has(s))
+      return next.length === sel.length ? sel : next
+    })
   }, [taken])
 
   const max = Math.min(event?.availableSeats ?? 0, MAX_SEATS_PER_BOOKING)
@@ -73,6 +78,7 @@ function BookShow() {
 
     setStatus('processing')
     setMessage('')
+    mySeats.current = new Set(mapped ? selected : [])
 
     startCheckout({
       eventId: event._id,
@@ -80,6 +86,7 @@ function BookShow() {
       seatNumbers: mapped ? selected : undefined,
       user,
       onPaid: (result) => {
+        mySeats.current = new Set()
         if (result.status !== 'paid' || !result.bookingCode) {
           router.push('/bookings') // the webhook is finishing it; the ticket shows up there
           return
@@ -94,8 +101,14 @@ function BookShow() {
       onCancel: () => {
         setStatus('idle')
         setMessage('Payment was cancelled. Your seats are still available.')
+        // The server frees my hold a moment after the window closes; keep my picks until then.
+        setTimeout(() => {
+          mySeats.current = new Set()
+          refetchSeats()
+        }, 2000)
       },
       onError: (msg) => {
+        mySeats.current = new Set()
         setStatus('idle')
         setMessage(msg)
         refetchEvent()

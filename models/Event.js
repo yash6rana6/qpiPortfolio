@@ -11,8 +11,6 @@ const EventSchema = new mongoose.Schema(
     endDate: Date, // optional — an event is "live" from date until endDate (or end of that day)
     posterImage: String,
     videoUrl: String,
-    // Seat names (A1, B4 ...) already paid for. Hidden from normal queries — use .select('+bookedSeats').
-    bookedSeats: { type: [String], default: [], select: false },
     totalSeats: { type: Number, default: 0, min: 0 },
     availableSeats: { type: Number, default: 0, min: 0 },
     pricePerSeat: { type: Number, default: 0, min: 0 },

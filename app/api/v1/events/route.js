@@ -1,21 +1,11 @@
 import { connectDB } from '../../../../lib/mongodb'
 import Event from '../../../../models/Event'
 import { requireAdmin } from '../../../../lib/auth'
+import { bustCache } from '../../../../lib/redis'
+import { pickEventFields } from '../../../../lib/eventInput'
 import { ok, fail, readJson, requireFields } from '../../../../lib/api'
 
 export const dynamic = 'force-dynamic'
-
-const WRITABLE = [
-  'title', 'category', 'description', 'venue', 'city', 'date', 'endDate', 'posterImage', 'videoUrl',
-  'totalSeats', 'availableSeats', 'pricePerSeat', 'status', 'isRecent', 'accentColor'
-]
-
-/** Only let through fields we own — no mass assignment from the request body. */
-function pick(body) {
-  const out = {}
-  for (const key of WRITABLE) if (body[key] !== undefined) out[key] = body[key]
-  return out
-}
 
 // Public
 export async function GET(request) {
@@ -42,12 +32,13 @@ export async function POST(request) {
     const body = await readJson(request)
     requireFields(body, ['title', 'category'])
 
-    const data = pick(body)
+    const data = pickEventFields(body)
     if (data.totalSeats !== undefined && data.availableSeats === undefined) {
       data.availableSeats = data.totalSeats
     }
 
     const event = await Event.create(data)
+    await bustCache()
     return ok(event, 201)
   } catch (err) {
     return fail(err)

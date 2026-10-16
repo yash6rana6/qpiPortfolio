@@ -1,8 +1,9 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import Image from "next/image"; // <-- Next.js Image import karein
-import { useRouter } from "next/navigation";
+import Image from "next/image";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "./AuthProvider.jsx";
 import { NAV_LINKS } from "../lib/siteConfig.js";
 import { cn } from "../lib/utils.js";
@@ -27,8 +28,16 @@ export default function Navbar({ tone = "overlay" }) {
   const t = TONES[tone] || TONES.overlay;
   const { user, loading, logout } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+
+  // close the mobile menu whenever the route changes
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
 
   async function handleLogout() {
+    setOpen(false);
     await logout();
     router.push("/");
     router.refresh();
@@ -83,7 +92,7 @@ export default function Navbar({ tone = "overlay" }) {
             )}
             <button
               onClick={handleLogout}
-              className={cn("text-sm transition-colors", t.muted)}
+              className={cn("hidden text-sm transition-colors md:inline", t.muted)}
             >
               Sign out
             </button>
@@ -105,7 +114,75 @@ export default function Navbar({ tone = "overlay" }) {
         >
           Book My Show
         </Link>
+
+        <button
+          type="button"
+          aria-label={open ? "Close menu" : "Open menu"}
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className={cn(
+            "inline-flex h-10 w-10 items-center justify-center rounded-full md:hidden",
+            t.brand,
+          )}
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            {open ? (
+              <path d="M6 6l12 12M18 6L6 18" />
+            ) : (
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            )}
+          </svg>
+        </button>
       </nav>
+
+      {open && (
+        <div
+          className={cn(
+            "absolute left-0 top-full w-full border-t border-white/10 px-6 py-4 backdrop-blur-md md:hidden",
+            tone === "solid" ? "bg-sand/95" : "bg-plum/95",
+          )}
+        >
+          <div className="flex flex-col gap-1">
+            {NAV_LINKS.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={() => setOpen(false)}
+                className={cn("rounded-lg px-2 py-3 text-base", tone === "solid" ? "text-plum" : "text-white")}
+              >
+                {link.label}
+              </Link>
+            ))}
+            {!loading && user && (
+              <>
+                <Link
+                  href="/bookings"
+                  onClick={() => setOpen(false)}
+                  className={cn("rounded-lg px-2 py-3 text-base", tone === "solid" ? "text-plum" : "text-white")}
+                >
+                  My tickets
+                </Link>
+                {user.role === "admin" && (
+                  <Link
+                    href="/admin"
+                    onClick={() => setOpen(false)}
+                    className="rounded-lg px-2 py-3 text-base text-mango"
+                  >
+                    Admin
+                  </Link>
+                )}
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className={cn("rounded-lg px-2 py-3 text-left text-base", tone === "solid" ? "text-plum/70" : "text-white/70")}
+                >
+                  Sign out
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </header>
   );
 }
