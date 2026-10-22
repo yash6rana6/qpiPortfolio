@@ -6,7 +6,7 @@ const nextConfig = {
     // Runs instrumentation.js on boot (starts the booking queue worker).
     instrumentationHook: true,
     // Keep these as plain Node requires instead of bundling them.
-    serverComponentsExternalPackages: ['ioredis', 'bullmq']
+    serverComponentsExternalPackages: ['ioredis', 'bullmq', 'pdfkit', 'qrcode']
   },
 
   images: {
@@ -23,7 +23,8 @@ const nextConfig = {
       { key: 'X-Content-Type-Options', value: 'nosniff' },
       { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
       { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+      // camera=(self): the organiser check-in scanner (/admin/scan) needs the camera.
+      { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
       // Only takes effect over https; no includeSubDomains so other subdomains can't be locked out by accident.
       { key: 'Strict-Transport-Security', value: 'max-age=15552000' }
     ]

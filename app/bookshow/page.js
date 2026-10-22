@@ -121,6 +121,7 @@ function BookShow() {
     return (
       <BookingConfirmed
         code={confirmation.bookingCode}
+        bookingId={confirmation.bookingId}
         seats={confirmation.seatNumbers || []}
         eventId={eventId}
         city={event?.city}

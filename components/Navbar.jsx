@@ -99,15 +99,6 @@ export default function Navbar({ tone = "overlay" }) {
           </>
         )}
 
-        {!loading && !user && (
-          <Link
-            href="/login"
-            className={cn("text-sm transition-colors", t.link)}
-          >
-            Sign in
-          </Link>
-        )}
-
         <Link
           href="/events"
           className="rounded-full bg-coral px-5 py-2 text-sm font-medium text-white shadow-glow-coral transition-transform duration-300 ease-spring hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
@@ -179,6 +170,16 @@ export default function Navbar({ tone = "overlay" }) {
                   Sign out
                 </button>
               </>
+            )}
+
+            {!loading && !user && (
+              <Link
+                href="/login"
+                onClick={() => setOpen(false)}
+                className={cn("rounded-lg px-2 py-3 text-base", tone === "solid" ? "text-plum" : "text-white")}
+              >
+                Sign in
+              </Link>
             )}
           </div>
         </div>

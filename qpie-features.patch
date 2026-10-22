@@ -1,0 +1,1878 @@
+From ed15d5b1829c7ddbfc4325c5b8b18435465ce3e0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 16 Oct 2026 08:32:38 +0000
+Subject: [PATCH] Add QR tickets + scanner, ticket emails, admin analytics,
+ user cancel/refund policy
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Fvx19fuzghCE7rLSiq5XoZ
+---
+ .env.local.example                            |   1 +
+ app/admin/analytics/page.js                   | 304 ++++++++++++++++++
+ app/admin/page.js                             |   8 +
+ app/admin/scan/page.js                        | 252 +++++++++++++++
+ app/api/v1/admin/analytics/route.js           |  92 ++++++
+ .../v1/admin/bookings/[id]/refund/route.js    |  18 ++
+ app/api/v1/admin/bookings/export/route.js     |  62 ++++
+ app/api/v1/admin/bookings/route.js            |  35 ++
+ app/api/v1/admin/scan/route.js                |  69 ++++
+ app/api/v1/bookings/[id]/cancel/route.js      |  37 +++
+ app/api/v1/bookings/[id]/ticket/route.js      |  53 +++
+ app/bookings/page.js                          |  85 +++++
+ app/bookshow/page.js                          |   1 +
+ components/booking/BookingConfirmed.jsx       |  14 +-
+ lib/adminBookings.js                          |  39 +++
+ lib/bookingService.js                         |  18 ++
+ lib/mailer.js                                 |   7 +-
+ lib/refundPolicy.js                           |  56 ++++
+ lib/refunds.js                                | 139 ++++++++
+ lib/seatCore.cjs                              |   6 +
+ lib/seatStore.js                              |   6 +
+ lib/tickets.js                                | 155 +++++++++
+ lib/worker.js                                 |  24 +-
+ models/Booking.js                             |  17 +-
+ next.config.js                                |   5 +-
+ package.json                                  |   3 +
+ 26 files changed, 1496 insertions(+), 10 deletions(-)
+ create mode 100644 app/admin/analytics/page.js
+ create mode 100644 app/admin/scan/page.js
+ create mode 100644 app/api/v1/admin/analytics/route.js
+ create mode 100644 app/api/v1/admin/bookings/[id]/refund/route.js
+ create mode 100644 app/api/v1/admin/bookings/export/route.js
+ create mode 100644 app/api/v1/admin/bookings/route.js
+ create mode 100644 app/api/v1/admin/scan/route.js
+ create mode 100644 app/api/v1/bookings/[id]/cancel/route.js
+ create mode 100644 app/api/v1/bookings/[id]/ticket/route.js
+ create mode 100644 lib/adminBookings.js
+ create mode 100644 lib/refundPolicy.js
+ create mode 100644 lib/refunds.js
+ create mode 100644 lib/tickets.js
+
+diff --git a/.env.local.example b/.env.local.example
+index 978f72f..dd70d9a 100644
+--- a/.env.local.example
++++ b/.env.local.example
+@@ -23,6 +23,7 @@ SEED_ADMIN_PASSWORD=change_this_password
+ # Google Account -> Security -> 2-Step Verification ON -> App passwords -> create one
+ SMTP_USER=yourname@gmail.com
+ SMTP_PASS=your_16_char_app_password
++# Ticket emails (QR + PDF after payment) and refund emails use this SMTP account.
+ # Optional: SMTP_HOST=smtp.gmail.com  SMTP_PORT=465  MAIL_FROM="QPIE <yourname@gmail.com>"
+ 
+ # --- Google sign-in (free) ---
+diff --git a/app/admin/analytics/page.js b/app/admin/analytics/page.js
+new file mode 100644
+index 0000000..c8de635
+--- /dev/null
++++ b/app/admin/analytics/page.js
+@@ -0,0 +1,304 @@
++'use client'
++
++import { useCallback, useEffect, useMemo, useState } from 'react'
++import Link from 'next/link'
++import { useRouter } from 'next/navigation'
++import { useAuth } from '../../../components/AuthProvider.jsx'
++import { formatNumber } from '../../../lib/utils.js'
++
++const inr = (n) => `₹${formatNumber(Math.round(n || 0))}`
++const fmtDate = (d) => (d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—')
++
++const STATUS_BADGE = {
++  paid: 'bg-emerald-100 text-emerald-700',
++  refunded: 'bg-slate-200 text-slate-600',
++  refunding: 'bg-sky-100 text-sky-700',
++  failed: 'bg-rose-100 text-rose-700',
++  created: 'bg-amber-100 text-amber-700',
++  expired: 'bg-zinc-100 text-zinc-500',
++  processing: 'bg-sky-100 text-sky-700'
++}
++
++const input = 'rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium text-zinc-800 outline-none focus:border-[#FF6B5B]'
++
++function Stat({ label, value, sub }) {
++  return (
++    <div className="rounded-2xl border border-orange-100 bg-white p-5">
++      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{label}</p>
++      <p className="mt-1 font-display text-3xl font-black text-zinc-900">{value}</p>
++      {sub && <p className="mt-1 text-xs text-zinc-500">{sub}</p>}
++    </div>
++  )
++}
++
++export default function AnalyticsPage() {
++  const { user, loading: authLoading } = useAuth()
++  const router = useRouter()
++  const isAdmin = user?.role === 'admin'
++
++  const [stats, setStats] = useState(null)
++  const [error, setError] = useState('')
++  const [notice, setNotice] = useState('')
++  const [refunding, setRefunding] = useState(null)
++
++  const [filters, setFilters] = useState({ event: '', status: 'active', q: '', checkedIn: '', from: '', to: '' })
++  const [page, setPage] = useState(1)
++  const [list, setList] = useState({ items: [], total: 0, pages: 1 })
++  const [listLoading, setListLoading] = useState(true)
++
++  const query = useMemo(() => {
++    const p = new URLSearchParams()
++    Object.entries(filters).forEach(([k, v]) => v && p.set(k, v))
++    return p
++  }, [filters])
++
++  const loadStats = useCallback(async () => {
++    try {
++      const res = await fetch('/api/v1/admin/analytics', { cache: 'no-store' })
++      const data = await res.json()
++      if (!res.ok) throw new Error(data.error || 'Could not load analytics')
++      setStats(data)
++    } catch (err) {
++      setError(err.message)
++    }
++  }, [])
++
++  const loadList = useCallback(async () => {
++    setListLoading(true)
++    try {
++      const p = new URLSearchParams(query)
++      p.set('page', String(page))
++      const res = await fetch(`/api/v1/admin/bookings?${p}`, { cache: 'no-store' })
++      const data = await res.json()
++      if (!res.ok) throw new Error(data.error || 'Could not load bookings')
++      setList(data)
++    } catch (err) {
++      setError(err.message)
++    } finally {
++      setListLoading(false)
++    }
++  }, [query, page])
++
++  useEffect(() => {
++    if (authLoading) return
++    if (!user) router.replace('/login?next=/admin/analytics')
++  }, [user, authLoading, router])
++
++  useEffect(() => { if (isAdmin) loadStats() }, [isAdmin, loadStats])
++  useEffect(() => { if (isAdmin) loadList() }, [isAdmin, loadList])
++
++  function setFilter(key, value) {
++    setPage(1)
++    setFilters((f) => ({ ...f, [key]: value }))
++  }
++
++  async function refund(b) {
++    const ok = window.confirm(
++      `Refund ₹${b.amount} to ${b.user?.name || 'the customer'} for ${b.bookingCode}?\n\nThis cancels the ticket, frees the seats and cannot be undone.`
++    )
++    if (!ok) return
++    setRefunding(b._id)
++    setError('')
++    setNotice('')
++    try {
++      const res = await fetch(`/api/v1/admin/bookings/${b._id}/refund`, { method: 'POST' })
++      const data = await res.json()
++      if (!res.ok) throw new Error(data.error || 'Refund failed')
++      setNotice(`Refunded ₹${data.refundAmount} for ${b.bookingCode}.`)
++      await Promise.all([loadList(), loadStats()])
++    } catch (err) {
++      setError(err.message)
++    } finally {
++      setRefunding(null)
++    }
++  }
++
++  if (authLoading || !user) return <main className="min-h-screen bg-[#FFFDF9]" />
++  if (!isAdmin) {
++    return (
++      <main className="flex min-h-screen items-center justify-center bg-[#FFFDF9] px-6 text-center">
++        <div>
++          <h1 className="font-display text-3xl font-black text-zinc-900">Organisers only</h1>
++          <Link href="/" className="mt-6 inline-block rounded-xl bg-[#FF6B5B] px-6 py-3 text-sm font-bold text-white">Back to QPIE</Link>
++        </div>
++      </main>
++    )
++  }
++
++  const maxDaily = Math.max(1, ...(stats?.daily || []).map((d) => d.revenue))
++
++  return (
++    <main className="min-h-screen w-full bg-[#FFFDF9] px-6 py-12 text-zinc-800 md:px-16">
++      <div className="flex items-center justify-between text-xs font-semibold text-zinc-500">
++        <Link href="/admin" className="hover:text-[#FF6B5B]">← Dashboard</Link>
++        <Link href="/admin/scan" className="hover:text-[#FF6B5B]">Open scanner →</Link>
++      </div>
++      <h1 className="mt-6 font-display text-4xl font-black text-zinc-900 md:text-5xl">Sales &amp; bookings</h1>
++
++      {error && <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p>}
++      {notice && <p role="status" className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">{notice}</p>}
++
++      {stats && (
++        <>
++          <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4">
++            <Stat label="Revenue" value={inr(stats.totals.revenue)} sub="paid, minus refunds" />
++            <Stat label="Seats sold" value={formatNumber(stats.totals.seatsSold)} sub={`${formatNumber(stats.totals.paidBookings)} bookings`} />
++            <Stat label="Checked in" value={formatNumber(stats.totals.checkedIn)} sub="seats scanned at the gate" />
++            <Stat label="Refunded" value={inr(stats.totals.refundedAmount)} sub={`${formatNumber(stats.totals.refundedBookings)} bookings`} />
++          </div>
++
++          {stats.daily.length > 0 && (
++            <section className="mt-8 rounded-2xl border border-orange-100 bg-white p-5">
++              <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Revenue — last {stats.days} days</h2>
++              <div className="mt-4 flex h-32 items-end gap-1.5">
++                {stats.daily.map((d) => (
++                  <div key={d.date} className="group relative flex-1" title={`${d.date}: ${inr(d.revenue)} · ${d.seats} seats`}>
++                    <div className="w-full rounded-t bg-[#FF6B5B]" style={{ height: `${Math.max(4, (d.revenue / maxDaily) * 100)}%` }} />
++                  </div>
++                ))}
++              </div>
++              <div className="mt-1 flex justify-between text-[10px] text-zinc-400">
++                <span>{stats.daily[0].date}</span>
++                <span>{stats.daily[stats.daily.length - 1].date}</span>
++              </div>
++            </section>
++          )}
++
++          <section className="mt-8 overflow-x-auto rounded-2xl border border-orange-100 bg-white">
++            <table className="w-full min-w-[720px] text-left text-sm">
++              <thead className="border-b border-orange-100 text-xs uppercase tracking-wide text-zinc-400">
++                <tr>
++                  <th className="px-4 py-3">Event</th>
++                  <th className="px-4 py-3 text-right">Seats sold</th>
++                  <th className="px-4 py-3 text-right">Capacity</th>
++                  <th className="px-4 py-3 text-right">Checked in</th>
++                  <th className="px-4 py-3 text-right">Revenue</th>
++                  <th className="px-4 py-3 text-right">Refunded</th>
++                </tr>
++              </thead>
++              <tbody>
++                {stats.events.map((e) => (
++                  <tr key={e.eventId} className="border-b border-zinc-50 last:border-0">
++                    <td className="px-4 py-3">
++                      <button className="text-left font-semibold hover:text-[#FF6B5B]" onClick={() => setFilter('event', e.eventId)}>
++                        {e.title}
++                      </button>
++                      <p className="text-xs text-zinc-400">{fmtDate(e.date)}</p>
++                    </td>
++                    <td className="px-4 py-3 text-right font-mono">{formatNumber(e.seatsSold)}</td>
++                    <td className="px-4 py-3 text-right font-mono text-zinc-500">
++                      {e.totalSeats ? `${Math.round((e.seatsSold / e.totalSeats) * 100)}% of ${formatNumber(e.totalSeats)}` : '—'}
++                    </td>
++                    <td className="px-4 py-3 text-right font-mono">{formatNumber(e.checkedIn)}</td>
++                    <td className="px-4 py-3 text-right font-mono font-bold">{inr(e.revenue)}</td>
++                    <td className="px-4 py-3 text-right font-mono text-zinc-500">{e.refundedAmount ? inr(e.refundedAmount) : '—'}</td>
++                  </tr>
++                ))}
++                {stats.events.length === 0 && (
++                  <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-400">No events yet.</td></tr>
++                )}
++              </tbody>
++            </table>
++          </section>
++        </>
++      )}
++
++      <section className="mt-12">
++        <div className="flex flex-wrap items-end justify-between gap-3">
++          <h2 className="font-display text-2xl font-black text-zinc-900">Bookings <span className="text-base font-semibold text-zinc-400">({formatNumber(list.total)})</span></h2>
++          <a
++            href={`/api/v1/admin/bookings/export?${query}`}
++            className="rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-bold text-white"
++          >
++            Download CSV
++          </a>
++        </div>
++
++        <div className="mt-4 flex flex-wrap gap-2">
++          <select aria-label="Event" className={input} value={filters.event} onChange={(e) => setFilter('event', e.target.value)}>
++            <option value="">All events</option>
++            {(stats?.events || []).map((e) => <option key={e.eventId} value={e.eventId}>{e.title}</option>)}
++          </select>
++          <select aria-label="Status" className={input} value={filters.status} onChange={(e) => setFilter('status', e.target.value)}>
++            <option value="active">Paid, refunded &amp; failed</option>
++            <option value="paid">Paid</option>
++            <option value="refunded">Refunded</option>
++            <option value="failed">Failed</option>
++            <option value="created">Payment pending</option>
++            <option value="">Everything</option>
++          </select>
++          <select aria-label="Check-in" className={input} value={filters.checkedIn} onChange={(e) => setFilter('checkedIn', e.target.value)}>
++            <option value="">Any entry status</option>
++            <option value="yes">Checked in</option>
++            <option value="no">Not yet in</option>
++          </select>
++          <input aria-label="From date" type="date" className={input} value={filters.from} onChange={(e) => setFilter('from', e.target.value)} />
++          <input aria-label="To date" type="date" className={input} value={filters.to} onChange={(e) => setFilter('to', e.target.value)} />
++          <input aria-label="Search" placeholder="Code, name or email" className={`${input} min-w-[200px] flex-1`} value={filters.q} onChange={(e) => setFilter('q', e.target.value)} />
++        </div>
++
++        <div className="mt-4 overflow-x-auto rounded-2xl border border-orange-100 bg-white">
++          <table className="w-full min-w-[860px] text-left text-sm">
++            <thead className="border-b border-orange-100 text-xs uppercase tracking-wide text-zinc-400">
++              <tr>
++                <th className="px-4 py-3">Code</th>
++                <th className="px-4 py-3">Customer</th>
++                <th className="px-4 py-3">Event</th>
++                <th className="px-4 py-3">Seats</th>
++                <th className="px-4 py-3 text-right">Amount</th>
++                <th className="px-4 py-3">Status</th>
++                <th className="px-4 py-3">Booked</th>
++                <th className="px-4 py-3" />
++              </tr>
++            </thead>
++            <tbody className={listLoading ? 'opacity-50' : ''}>
++              {list.items.map((b) => (
++                <tr key={b._id} className="border-b border-zinc-50 last:border-0">
++                  <td className="px-4 py-3 font-mono font-bold">{b.bookingCode || '—'}</td>
++                  <td className="px-4 py-3">
++                    <p className="font-semibold">{b.user?.name || '—'}</p>
++                    <p className="text-xs text-zinc-400">{b.user?.email}</p>
++                  </td>
++                  <td className="px-4 py-3">{b.event?.title || 'Event removed'}</td>
++                  <td className="px-4 py-3 text-xs">{b.seatNumbers?.length ? b.seatNumbers.join(', ') : b.seats}</td>
++                  <td className="px-4 py-3 text-right font-mono">
++                    {inr(b.amount)}
++                    {b.status === 'refunded' && b.refundAmount !== undefined && (
++                      <p className="text-xs text-zinc-400">refunded {inr(b.refundAmount)}</p>
++                    )}
++                  </td>
++                  <td className="px-4 py-3">
++                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase ${STATUS_BADGE[b.status] || ''}`}>{b.status}</span>
++                    {b.checkedIn && <span className="ml-1 rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold uppercase text-white">in</span>}
++                    {b.cancelledBy && <p className="mt-1 text-[10px] text-zinc-400">cancelled by {b.cancelledBy}</p>}
++                  </td>
++                  <td className="px-4 py-3 text-xs text-zinc-500">{fmtDate(b.createdAt)}</td>
++                  <td className="px-4 py-3 text-right">
++                    {b.status === 'paid' && (
++                      <button
++                        onClick={() => refund(b)}
++                        disabled={refunding === b._id}
++                        className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-40"
++                      >
++                        {refunding === b._id ? 'Refunding…' : 'Refund'}
++                      </button>
++                    )}
++                  </td>
++                </tr>
++              ))}
++              {!listLoading && list.items.length === 0 && (
++                <tr><td colSpan={8} className="px-4 py-10 text-center text-zinc-400">No bookings match these filters.</td></tr>
++              )}
++            </tbody>
++          </table>
++        </div>
++
++        <div className="mt-4 flex items-center justify-between text-sm">
++          <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-zinc-200 px-4 py-2 font-semibold disabled:opacity-30">← Prev</button>
++          <span className="text-zinc-500">Page {page} of {list.pages}</span>
++          <button disabled={page >= list.pages} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-zinc-200 px-4 py-2 font-semibold disabled:opacity-30">Next →</button>
++        </div>
++      </section>
++    </main>
++  )
++}
+diff --git a/app/admin/page.js b/app/admin/page.js
+index 304a778..3c27b7d 100644
+--- a/app/admin/page.js
++++ b/app/admin/page.js
+@@ -176,6 +176,14 @@ export default function AdminPage() {
+         <p className="mt-2 text-sm text-zinc-500">
+           Everything you publish here goes live on the site and opens for booking.
+         </p>
++        <div className="mt-4 flex flex-wrap gap-3">
++          <Link href="/admin/analytics" className="rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-bold text-white">
++            Sales &amp; bookings
++          </Link>
++          <Link href="/admin/scan" className="rounded-xl border border-zinc-300 px-5 py-2.5 text-sm font-bold text-zinc-800">
++            Check-in scanner
++          </Link>
++        </div>
+       </div>
+ 
+       {error && (
+diff --git a/app/admin/scan/page.js b/app/admin/scan/page.js
+new file mode 100644
+index 0000000..99c4e89
+--- /dev/null
++++ b/app/admin/scan/page.js
+@@ -0,0 +1,252 @@
++'use client'
++
++import { useCallback, useEffect, useRef, useState } from 'react'
++import Link from 'next/link'
++import { useRouter } from 'next/navigation'
++import jsQR from 'jsqr'
++import { useAuth } from '../../../components/AuthProvider.jsx'
++
++const RESULT_STYLE = {
++  ok: { bg: 'bg-emerald-600', title: 'ENTRY OK' },
++  already: { bg: 'bg-amber-500', title: 'ALREADY USED' },
++  wrong_event: { bg: 'bg-amber-500', title: 'WRONG EVENT' },
++  not_valid: { bg: 'bg-rose-600', title: 'NOT VALID' },
++  invalid: { bg: 'bg-rose-600', title: 'UNKNOWN CODE' }
++}
++
++const SAME_CODE_COOLDOWN_MS = 4000
++
++export default function ScanPage() {
++  const { user, loading: authLoading } = useAuth()
++  const router = useRouter()
++
++  const videoRef = useRef(null)
++  const canvasRef = useRef(null)
++  const lastScan = useRef({ code: '', at: 0 })
++  const busy = useRef(false)
++  const eventIdRef = useRef('')
++
++  const [events, setEvents] = useState([])
++  const [eventId, setEventId] = useState('')
++  const [cameraOn, setCameraOn] = useState(false)
++  const [cameraError, setCameraError] = useState('')
++  const [manual, setManual] = useState('')
++  const [result, setResult] = useState(null)
++  const [history, setHistory] = useState([])
++
++  const isAdmin = user?.role === 'admin'
++  eventIdRef.current = eventId
++
++  useEffect(() => {
++    if (authLoading) return
++    if (!user) router.replace('/login?next=/admin/scan')
++  }, [user, authLoading, router])
++
++  useEffect(() => {
++    if (!isAdmin) return
++    fetch('/api/v1/events', { cache: 'no-store' })
++      .then((r) => r.json())
++      .then((d) => setEvents(Array.isArray(d) ? d : []))
++      .catch(() => {})
++  }, [isAdmin])
++
++  const submit = useCallback(async (rawCode) => {
++    const code = String(rawCode || '').trim().toUpperCase()
++    if (!code || busy.current) return
++    const now = Date.now()
++    if (lastScan.current.code === code && now - lastScan.current.at < SAME_CODE_COOLDOWN_MS) return
++    lastScan.current = { code, at: now }
++    busy.current = true
++
++    try {
++      const res = await fetch('/api/v1/admin/scan', {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ code, eventId: eventIdRef.current || undefined })
++      })
++      const data = await res.json()
++      if (!res.ok) throw new Error(data.error || 'Scan failed')
++      setResult(data)
++      setHistory((h) => [{ ...data, code, at: new Date() }, ...h].slice(0, 15))
++      if (navigator.vibrate) navigator.vibrate(data.result === 'ok' ? 80 : [120, 60, 120])
++    } catch (err) {
++      setResult({ result: 'error', message: err.message })
++    } finally {
++      busy.current = false
++    }
++  }, [])
++
++  // Camera + QR decoding loop (jsQR on a canvas, so it also works on iPhones where BarcodeDetector is missing).
++  useEffect(() => {
++    if (!cameraOn || !isAdmin) return
++    let stream
++    let raf
++    let stopped = false
++
++    async function start() {
++      try {
++        setCameraError('')
++        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
++        const video = videoRef.current
++        if (!video || stopped) return
++        video.srcObject = stream
++        await video.play()
++        tick()
++      } catch (err) {
++        setCameraOn(false)
++        setCameraError(
++          err?.name === 'NotAllowedError'
++            ? 'Camera permission was denied. Allow it in the browser, or type the code below.'
++            : 'Camera could not be started (it needs https or localhost). Type the code below instead.'
++        )
++      }
++    }
++
++    function tick() {
++      if (stopped) return
++      const video = videoRef.current
++      const canvas = canvasRef.current
++      if (video && canvas && video.readyState === video.HAVE_ENOUGH_DATA) {
++        const w = video.videoWidth
++        const h = video.videoHeight
++        canvas.width = w
++        canvas.height = h
++        const ctx = canvas.getContext('2d', { willReadFrequently: true })
++        ctx.drawImage(video, 0, 0, w, h)
++        const found = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' })
++        if (found?.data) submit(found.data)
++      }
++      raf = requestAnimationFrame(tick)
++    }
++
++    start()
++    return () => {
++      stopped = true
++      cancelAnimationFrame(raf)
++      stream?.getTracks().forEach((t) => t.stop())
++    }
++  }, [cameraOn, isAdmin, submit])
++
++  if (authLoading || !user) return <main className="min-h-screen bg-[#FFFDF9]" />
++  if (!isAdmin) {
++    return (
++      <main className="flex min-h-screen items-center justify-center bg-[#FFFDF9] px-6 text-center text-zinc-800">
++        <div>
++          <h1 className="font-display text-3xl font-black">Organisers only</h1>
++          <Link href="/" className="mt-6 inline-block rounded-xl bg-[#FF6B5B] px-6 py-3 text-sm font-bold text-white">
++            Back to QPIE
++          </Link>
++        </div>
++      </main>
++    )
++  }
++
++  const style = result ? RESULT_STYLE[result.result] || RESULT_STYLE.invalid : null
++
++  return (
++    <main className="min-h-screen bg-[#FFFDF9] px-4 py-8 text-zinc-800 md:px-16">
++      <div className="mx-auto max-w-xl">
++        <div className="flex items-center justify-between text-xs font-semibold text-zinc-500">
++          <Link href="/admin" className="hover:text-[#FF6B5B]">← Dashboard</Link>
++          <Link href="/admin/analytics" className="hover:text-[#FF6B5B]">Analytics</Link>
++        </div>
++
++        <h1 className="mt-4 font-display text-4xl font-black text-zinc-900">Check-in scanner</h1>
++
++        <label className="mt-6 block text-xs font-semibold text-zinc-500" htmlFor="scan-event">
++          Event gate (optional — rejects tickets for other shows)
++        </label>
++        <select
++          id="scan-event"
++          value={eventId}
++          onChange={(e) => setEventId(e.target.value)}
++          className="mt-1 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-medium"
++        >
++          <option value="">Any event</option>
++          {events.map((ev) => (
++            <option key={ev._id} value={ev._id}>{ev.title}</option>
++          ))}
++        </select>
++
++        <div className="mt-5 overflow-hidden rounded-2xl bg-zinc-900">
++          {cameraOn ? (
++            <video ref={videoRef} playsInline muted className="aspect-square w-full object-cover" />
++          ) : (
++            <div className="flex aspect-square w-full items-center justify-center text-sm text-zinc-400">Camera is off</div>
++          )}
++          <canvas ref={canvasRef} className="hidden" />
++        </div>
++        <button
++          onClick={() => setCameraOn((v) => !v)}
++          className="mt-3 w-full rounded-xl bg-[#FF6B5B] py-3 text-sm font-bold uppercase tracking-wide text-white"
++        >
++          {cameraOn ? 'Stop camera' : 'Start camera'}
++        </button>
++        {cameraError && <p role="alert" className="mt-3 text-sm font-medium text-rose-600">{cameraError}</p>}
++
++        <form
++          onSubmit={(e) => {
++            e.preventDefault()
++            lastScan.current = { code: '', at: 0 } // a typed code is always intentional
++            submit(manual)
++            setManual('')
++          }}
++          className="mt-4 flex gap-2"
++        >
++          <input
++            value={manual}
++            onChange={(e) => setManual(e.target.value)}
++            placeholder="Type ticket code, e.g. QP1A2B3C4D"
++            autoCapitalize="characters"
++            className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 font-mono text-sm uppercase"
++          />
++          <button className="rounded-xl bg-zinc-900 px-5 text-sm font-bold text-white">Check</button>
++        </form>
++
++        {result && (
++          <div
++            role="status"
++            aria-live="assertive"
++            className={`mt-6 rounded-2xl p-6 text-white ${result.result === 'error' ? 'bg-rose-600' : style.bg}`}
++          >
++            <p className="font-display text-3xl font-black">{result.result === 'error' ? 'ERROR' : style.title}</p>
++            {result.result === 'error' && <p className="mt-2 text-sm">{result.message}</p>}
++            {result.result === 'invalid' && <p className="mt-2 text-sm">No ticket has code {result.bookingCode}.</p>}
++            {result.result === 'not_valid' && (
++              <p className="mt-2 text-sm">This booking is “{result.status}” — it is not a valid ticket (refunded or unpaid).</p>
++            )}
++            {result.eventTitle && (
++              <div className="mt-3 text-sm leading-relaxed">
++                <p className="text-lg font-bold">{result.eventTitle}</p>
++                <p>{result.holder} · {result.seats}</p>
++                <p className="font-mono">{result.bookingCode}</p>
++                {result.result === 'already' && result.checkedInAt && (
++                  <p className="mt-1 font-semibold">Entered at {new Date(result.checkedInAt).toLocaleTimeString('en-IN')}</p>
++                )}
++              </div>
++            )}
++            {result.stats && (
++              <p className="mt-3 text-sm font-semibold">Inside: {result.stats.checkedIn} / {result.stats.total}</p>
++            )}
++          </div>
++        )}
++
++        {history.length > 0 && (
++          <div className="mt-8">
++            <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Recent scans</h2>
++            <ul className="mt-2 divide-y divide-zinc-100 rounded-2xl border border-zinc-100 bg-white">
++              {history.map((h, i) => (
++                <li key={i} className="flex items-center justify-between px-4 py-2.5 text-sm">
++                  <span className="font-mono font-semibold">{h.bookingCode || h.code}</span>
++                  <span className={h.result === 'ok' ? 'font-bold text-emerald-600' : 'font-bold text-rose-600'}>
++                    {(RESULT_STYLE[h.result] || RESULT_STYLE.invalid).title}
++                  </span>
++                </li>
++              ))}
++            </ul>
++          </div>
++        )}
++      </div>
++    </main>
++  )
++}
+diff --git a/app/api/v1/admin/analytics/route.js b/app/api/v1/admin/analytics/route.js
+new file mode 100644
+index 0000000..027992c
+--- /dev/null
++++ b/app/api/v1/admin/analytics/route.js
+@@ -0,0 +1,92 @@
++import { connectDB } from '../../../../../lib/mongodb'
++import Booking from '../../../../../models/Booking'
++import Event from '../../../../../models/Event'
++import { requireAdmin } from '../../../../../lib/auth'
++import { ok, fail } from '../../../../../lib/api'
++
++export const dynamic = 'force-dynamic'
++
++const isPaid = { $eq: ['$status', 'paid'] }
++const isRefunded = { $eq: ['$status', 'refunded'] }
++// A partial refund (policy: 50%) leaves the rest with us — that part still counts as revenue.
++const retained = { $max: [0, { $subtract: ['$amount', { $ifNull: ['$refundAmount', '$amount'] }] }] }
++const refundedRupees = { $ifNull: ['$refundAmount', '$amount'] }
++
++/**
++ * Dashboard numbers. "Revenue" = money kept: paid bookings + the retained part of partly-refunded ones.
++ * "Seats sold" counts paid bookings only (cancelled seats go back on sale).
++ */
++export async function GET(request) {
++  try {
++    await requireAdmin()
++    await connectDB()
++
++    const days = Math.min(Math.max(parseInt(new URL(request.url).searchParams.get('days')) || 14, 1), 90)
++    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
++
++    const [perEvent, events, daily] = await Promise.all([
++      Booking.aggregate([
++        { $match: { status: { $in: ['paid', 'refunded', 'refunding'] } } },
++        {
++          $group: {
++            _id: '$event',
++            seatsSold: { $sum: { $cond: [isPaid, '$seats', 0] } },
++            paidBookings: { $sum: { $cond: [isPaid, 1, 0] } },
++            checkedIn: { $sum: { $cond: [{ $and: [isPaid, '$checkedIn'] }, '$seats', 0] } },
++            revenue: { $sum: { $cond: [isPaid, '$amount', { $cond: [isRefunded, retained, 0] }] } },
++            refundedBookings: { $sum: { $cond: [isRefunded, 1, 0] } },
++            refundedAmount: { $sum: { $cond: [isRefunded, refundedRupees, 0] } }
++          }
++        }
++      ]),
++      Event.find().select('title date totalSeats availableSeats pricePerSeat status').sort({ date: -1 }).lean(),
++      Booking.aggregate([
++        { $match: { status: 'paid', createdAt: { $gte: since } } },
++        {
++          $group: {
++            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Kolkata' } },
++            revenue: { $sum: '$amount' },
++            seats: { $sum: '$seats' }
++          }
++        },
++        { $sort: { _id: 1 } }
++      ])
++    ])
++
++    const byEvent = new Map(perEvent.map((r) => [String(r._id), r]))
++    const rows = events.map((e) => {
++      const r = byEvent.get(String(e._id)) || {}
++      return {
++        eventId: e._id,
++        title: e.title,
++        date: e.date,
++        status: e.status,
++        totalSeats: e.totalSeats,
++        availableSeats: e.availableSeats,
++        seatsSold: r.seatsSold || 0,
++        paidBookings: r.paidBookings || 0,
++        checkedIn: r.checkedIn || 0,
++        revenue: r.revenue || 0,
++        refundedBookings: r.refundedBookings || 0,
++        refundedAmount: r.refundedAmount || 0
++      }
++    })
++
++    const sum = (k) => rows.reduce((t, r) => t + r[k], 0)
++    return ok({
++      totals: {
++        revenue: sum('revenue'),
++        seatsSold: sum('seatsSold'),
++        paidBookings: sum('paidBookings'),
++        checkedIn: sum('checkedIn'),
++        refundedBookings: sum('refundedBookings'),
++        refundedAmount: sum('refundedAmount')
++      },
++      events: rows,
++      daily: daily.map((d) => ({ date: d._id, revenue: d.revenue, seats: d.seats })),
++      days
++    })
++  } catch (err) {
++    return fail(err)
++  }
++}
+diff --git a/app/api/v1/admin/bookings/[id]/refund/route.js b/app/api/v1/admin/bookings/[id]/refund/route.js
+new file mode 100644
+index 0000000..8643843
+--- /dev/null
++++ b/app/api/v1/admin/bookings/[id]/refund/route.js
+@@ -0,0 +1,18 @@
++import mongoose from 'mongoose'
++import { requireAdmin } from '../../../../../../../lib/auth'
++import { cancelAndRefund } from '../../../../../../../lib/refunds'
++import { ok, fail, ApiError } from '../../../../../../../lib/api'
++
++export const dynamic = 'force-dynamic'
++
++/** Manual refund (always 100%) for any paid booking. Frees the seats and emails the customer. */
++export async function POST(_request, { params }) {
++  try {
++    await requireAdmin()
++    if (!mongoose.isValidObjectId(params.id)) throw new ApiError(404, 'Booking not found')
++    const result = await cancelAndRefund({ bookingId: params.id, by: 'admin' })
++    return ok(result)
++  } catch (err) {
++    return fail(err)
++  }
++}
+diff --git a/app/api/v1/admin/bookings/export/route.js b/app/api/v1/admin/bookings/export/route.js
+new file mode 100644
+index 0000000..fcb7ede
+--- /dev/null
++++ b/app/api/v1/admin/bookings/export/route.js
+@@ -0,0 +1,62 @@
++import { connectDB } from '../../../../../../lib/mongodb'
++import Booking from '../../../../../../models/Booking'
++import { requireAdmin } from '../../../../../../lib/auth'
++import { bookingFilterFrom } from '../../../../../../lib/adminBookings'
++import { fail } from '../../../../../../lib/api'
++
++export const dynamic = 'force-dynamic'
++
++const MAX_ROWS = 20000
++const COLUMNS = [
++  'Booking code', 'Status', 'Event', 'Event date', 'Customer', 'Email', 'Phone', 'Seats', 'Seat numbers',
++  'Price per seat', 'Amount', 'Refunded amount', 'Cancelled by', 'Checked in', 'Checked in at',
++  'Razorpay order', 'Razorpay payment', 'Refund id', 'Booked at'
++]
++
++// Quote everything; a leading = + - @ would be run as a formula by Excel/Sheets, so defuse it.
++function cell(v) {
++  if (v === undefined || v === null) return '""'
++  let s = v instanceof Date ? v.toISOString() : String(v)
++  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
++  return `"${s.replace(/"/g, '""')}"`
++}
++
++/** CSV download of the bookings matching the same filters as the list. */
++export async function GET(request) {
++  try {
++    await requireAdmin()
++    await connectDB()
++
++    const filter = await bookingFilterFrom(new URL(request.url).searchParams)
++    const rows = await Booking.find(filter)
++      .sort({ createdAt: -1 })
++      .limit(MAX_ROWS)
++      .populate('event', 'title date')
++      .populate('user', 'name email phone')
++      .lean()
++
++    const lines = [COLUMNS.map(cell).join(',')]
++    for (const b of rows) {
++      lines.push(
++        [
++          b.bookingCode, b.status, b.event?.title, b.event?.date, b.user?.name, b.user?.email, b.user?.phone,
++          b.seats, (b.seatNumbers || []).join(' '), b.pricePerSeat, b.amount, b.refundAmount, b.cancelledBy,
++          b.checkedIn ? 'yes' : 'no', b.checkedInAt, b.razorpayOrderId, b.razorpayPaymentId, b.refundId, b.createdAt
++        ]
++          .map(cell)
++          .join(',')
++      )
++    }
++
++    const stamp = new Date().toISOString().slice(0, 10)
++    return new Response('﻿' + lines.join('\r\n'), {
++      headers: {
++        'Content-Type': 'text/csv; charset=utf-8',
++        'Content-Disposition': `attachment; filename="qpie-bookings-${stamp}.csv"`,
++        'Cache-Control': 'no-store'
++      }
++    })
++  } catch (err) {
++    return fail(err)
++  }
++}
+diff --git a/app/api/v1/admin/bookings/route.js b/app/api/v1/admin/bookings/route.js
+new file mode 100644
+index 0000000..d72591e
+--- /dev/null
++++ b/app/api/v1/admin/bookings/route.js
+@@ -0,0 +1,35 @@
++import { connectDB } from '../../../../../lib/mongodb'
++import Booking from '../../../../../models/Booking'
++import { requireAdmin } from '../../../../../lib/auth'
++import { bookingFilterFrom } from '../../../../../lib/adminBookings'
++import { ok, fail } from '../../../../../lib/api'
++
++export const dynamic = 'force-dynamic'
++
++/** Admin bookings list. ?event= &status= (or "active") &q= &checkedIn=yes|no &from= &to= &page= &limit= */
++export async function GET(request) {
++  try {
++    await requireAdmin()
++    await connectDB()
++
++    const { searchParams } = new URL(request.url)
++    const filter = await bookingFilterFrom(searchParams)
++    const limit = Math.min(Math.max(parseInt(searchParams.get('limit')) || 25, 1), 100)
++    const page = Math.max(parseInt(searchParams.get('page')) || 1, 1)
++
++    const [items, total] = await Promise.all([
++      Booking.find(filter)
++        .sort({ createdAt: -1 })
++        .skip((page - 1) * limit)
++        .limit(limit)
++        .populate('event', 'title date')
++        .populate('user', 'name email phone')
++        .lean(),
++      Booking.countDocuments(filter)
++    ])
++
++    return ok({ items, total, page, pages: Math.max(Math.ceil(total / limit), 1) })
++  } catch (err) {
++    return fail(err)
++  }
++}
+diff --git a/app/api/v1/admin/scan/route.js b/app/api/v1/admin/scan/route.js
+new file mode 100644
+index 0000000..830f914
+--- /dev/null
++++ b/app/api/v1/admin/scan/route.js
+@@ -0,0 +1,69 @@
++import mongoose from 'mongoose'
++import { connectDB } from '../../../../../lib/mongodb'
++import Booking from '../../../../../models/Booking'
++import { requireAdmin } from '../../../../../lib/auth'
++import { ok, fail, readJson, requireFields } from '../../../../../lib/api'
++
++export const dynamic = 'force-dynamic'
++
++const view = (b) => ({
++  bookingCode: b.bookingCode,
++  eventTitle: b.event?.title,
++  holder: b.user?.name,
++  seats: b.seatNumbers?.length ? b.seatNumbers.join(', ') : `${b.seats} ticket${b.seats > 1 ? 's' : ''}`,
++  checkedInAt: b.checkedInAt
++})
++
++/**
++ * Check-in. Body: { code, eventId? }.  Always answers 200 with a `result` the scanner can show:
++ *   ok | already | wrong_event | not_valid | invalid
++ * The flip to checkedIn is ONE atomic update, so two gates scanning the same ticket at the same
++ * moment can never both get "ok".
++ */
++export async function POST(request) {
++  try {
++    const admin = await requireAdmin()
++    await connectDB()
++
++    const body = await readJson(request)
++    requireFields(body, ['code'])
++    const code = String(body.code).trim().toUpperCase().slice(0, 32)
++    const eventId = mongoose.isValidObjectId(body.eventId) ? String(body.eventId) : null
++
++    const match = { bookingCode: code, status: 'paid', checkedIn: { $ne: true } }
++    if (eventId) match.event = eventId
++
++    const hit = await Booking.findOneAndUpdate(
++      match,
++      { $set: { checkedIn: true, checkedInAt: new Date(), checkedInBy: admin.sub } },
++      { new: true }
++    )
++      .populate('event', 'title')
++      .populate('user', 'name')
++      .lean()
++
++    if (hit) {
++      if (!hit.event?._id) return ok({ result: 'ok', ...view(hit), stats: null }) // event was deleted: nothing to count
++      const [inside, total] = await Promise.all([
++        Booking.aggregate([
++          { $match: { event: hit.event._id, status: 'paid', checkedIn: true } },
++          { $group: { _id: null, n: { $sum: '$seats' } } }
++        ]),
++        Booking.aggregate([
++          { $match: { event: hit.event._id, status: 'paid' } },
++          { $group: { _id: null, n: { $sum: '$seats' } } }
++        ])
++      ])
++      return ok({ result: 'ok', ...view(hit), stats: { checkedIn: inside[0]?.n || 0, total: total[0]?.n || 0 } })
++    }
++
++    // Not admitted: work out why, so the gate staff see a useful message.
++    const b = await Booking.findOne({ bookingCode: code }).populate('event', 'title').populate('user', 'name').lean()
++    if (!b) return ok({ result: 'invalid', bookingCode: code })
++    if (b.status !== 'paid') return ok({ result: 'not_valid', status: b.status, ...view(b) })
++    if (eventId && String(b.event?._id) !== eventId) return ok({ result: 'wrong_event', ...view(b) })
++    return ok({ result: 'already', ...view(b) })
++  } catch (err) {
++    return fail(err)
++  }
++}
+diff --git a/app/api/v1/bookings/[id]/cancel/route.js b/app/api/v1/bookings/[id]/cancel/route.js
+new file mode 100644
+index 0000000..9f1215e
+--- /dev/null
++++ b/app/api/v1/bookings/[id]/cancel/route.js
+@@ -0,0 +1,37 @@
++import mongoose from 'mongoose'
++import { requireUser } from '../../../../../../lib/auth'
++import { cancelAndRefund, quoteFor } from '../../../../../../lib/refunds'
++import { POLICY_TEXT } from '../../../../../../lib/refundPolicy'
++import { rateLimit } from '../../../../../../lib/redis'
++import { ok, fail, ApiError } from '../../../../../../lib/api'
++
++export const dynamic = 'force-dynamic'
++
++function checkId(id) {
++  if (!mongoose.isValidObjectId(id)) throw new ApiError(404, 'Booking not found')
++}
++
++/** Preview: what would I get back if I cancelled right now? */
++export async function GET(_request, { params }) {
++  try {
++    const session = await requireUser()
++    checkId(params.id)
++    const quote = await quoteFor({ bookingId: params.id, by: 'user', userId: session.sub })
++    return ok({ ...quote, policy: POLICY_TEXT })
++  } catch (err) {
++    return fail(err)
++  }
++}
++
++/** Cancel a paid ticket and refund it according to the refund policy. */
++export async function POST(_request, { params }) {
++  try {
++    const session = await requireUser()
++    checkId(params.id)
++    await rateLimit(`cancel:${session.sub}`, 10, 60, ApiError)
++    const result = await cancelAndRefund({ bookingId: params.id, by: 'user', userId: session.sub })
++    return ok(result)
++  } catch (err) {
++    return fail(err)
++  }
++}
+diff --git a/app/api/v1/bookings/[id]/ticket/route.js b/app/api/v1/bookings/[id]/ticket/route.js
+new file mode 100644
+index 0000000..6379078
+--- /dev/null
++++ b/app/api/v1/bookings/[id]/ticket/route.js
+@@ -0,0 +1,53 @@
++import mongoose from 'mongoose'
++import { connectDB } from '../../../../../../lib/mongodb'
++import Booking from '../../../../../../models/Booking'
++import User from '../../../../../../models/User'
++import { requireUser } from '../../../../../../lib/auth'
++import { buildTicketPdf, qrPng } from '../../../../../../lib/tickets'
++import { fail, ApiError } from '../../../../../../lib/api'
++
++export const dynamic = 'force-dynamic'
++export const runtime = 'nodejs'
++
++/**
++ * GET /api/v1/bookings/:id/ticket            -> ticket PDF
++ * GET /api/v1/bookings/:id/ticket?format=png -> the QR image only
++ * Only the owner (or an admin) gets it, and only for a paid booking.
++ */
++export async function GET(request, { params }) {
++  try {
++    const session = await requireUser()
++    if (!mongoose.isValidObjectId(params.id)) throw new ApiError(404, 'Booking not found')
++    await connectDB()
++
++    const booking = await Booking.findById(params.id)
++      .populate('event', 'title venue city date')
++      .populate('user', 'name email')
++      .lean()
++    if (!booking) throw new ApiError(404, 'Booking not found')
++
++    if (String(booking.user?._id) !== String(session.sub)) {
++      const me = await User.findById(session.sub).select('role').lean()
++      if (me?.role !== 'admin') throw new ApiError(404, 'Booking not found') // don't reveal that it exists
++    }
++    if (booking.status !== 'paid' || !booking.bookingCode) throw new ApiError(409, 'No active ticket for this booking')
++
++    const headers = { 'Cache-Control': 'private, no-store' }
++    const format = new URL(request.url).searchParams.get('format')
++
++    if (format === 'png') {
++      return new Response(await qrPng(booking.bookingCode), { headers: { ...headers, 'Content-Type': 'image/png' } })
++    }
++
++    const pdf = await buildTicketPdf(booking)
++    return new Response(pdf, {
++      headers: {
++        ...headers,
++        'Content-Type': 'application/pdf',
++        'Content-Disposition': `attachment; filename="QPIE-ticket-${booking.bookingCode}.pdf"`
++      }
++    })
++  } catch (err) {
++    return fail(err)
++  }
++}
+diff --git a/app/bookings/page.js b/app/bookings/page.js
+index 53d3837..60fd8a4 100644
+--- a/app/bookings/page.js
++++ b/app/bookings/page.js
+@@ -11,6 +11,7 @@ const STATUS_STYLE = {
+   created: 'border-amber-500/30 bg-amber-500/10 text-amber-700 shadow-sm',
+   processing: 'border-sky-500/30 bg-sky-500/10 text-sky-700 shadow-sm',
+   refunded: 'border-slate-500/30 bg-slate-500/10 text-slate-600 shadow-sm',
++  refunding: 'border-sky-500/30 bg-sky-500/10 text-sky-700 shadow-sm',
+   failed: 'border-rose-500/30 bg-rose-500/10 text-rose-700 shadow-sm'
+ }
+ 
+@@ -19,6 +20,7 @@ const STATUS_LABEL = {
+   created: 'PAYMENT PENDING',
+   processing: 'PROCESSING',
+   refunded: 'REFUNDED',
++  refunding: 'REFUNDING',
+   failed: 'PAYMENT FAILED'
+ }
+ 
+@@ -28,6 +30,8 @@ export default function BookingsPage() {
+ 
+   const [bookings, setBookings] = useState([])
+   const [loading, setLoading] = useState(true)
++  const [cancelling, setCancelling] = useState(null)
++  const [notice, setNotice] = useState('')
+ 
+   useEffect(() => {
+     if (authLoading) return
+@@ -47,6 +51,37 @@ export default function BookingsPage() {
+     return <main className="min-h-screen bg-[#faf8f5]" />
+   }
+ 
++  async function cancelBooking(booking) {
++    setNotice('')
++    setCancelling(booking._id)
++    try {
++      const prev = await fetch(`/api/v1/bookings/${booking._id}/cancel`, { cache: 'no-store' })
++      const quote = await prev.json()
++      if (!prev.ok) throw new Error(quote.error || 'Could not check this booking')
++      if (!quote.allowed) {
++        setNotice(`${quote.reason} Refund policy: ${quote.policy}`)
++        return
++      }
++      const sure = window.confirm(
++        `Cancel this booking and get ₹${quote.refundAmount} back (${quote.percent}% refund)?\n\nRefund policy: ${quote.policy}\n\nThis cannot be undone.`
++      )
++      if (!sure) return
++
++      const res = await fetch(`/api/v1/bookings/${booking._id}/cancel`, { method: 'POST' })
++      const data = await res.json()
++      if (!res.ok) throw new Error(data.error || 'Cancellation failed')
++
++      setBookings((list) =>
++        list.map((b) => (b._id === booking._id ? { ...b, status: 'refunded', refundAmount: data.refundAmount, cancelledBy: 'user' } : b))
++      )
++      setNotice(`Booking cancelled. ₹${data.refundAmount} is being refunded to your original payment method (usually 5–7 working days).`)
++    } catch (err) {
++      setNotice(err.message)
++    } finally {
++      setCancelling(null)
++    }
++  }
++
+   const lastPaid = bookings.find((b) => b.status === 'paid')
+ 
+   return (
+@@ -78,6 +113,12 @@ export default function BookingsPage() {
+           </span>
+         </div>
+ 
++        {notice && (
++          <p role="status" className="mt-6 border border-indigo-200 bg-indigo-50 p-3 text-sm font-semibold text-indigo-800">
++            {notice}
++          </p>
++        )}
++
+         <div className="mt-10 space-y-8">
+           {loading && (
+             <p className="text-sm font-medium tracking-wide text-slate-500">Retrieving passes…</p>
+@@ -167,6 +208,50 @@ export default function BookingsPage() {
+                   </div>
+                 </div>
+ 
++                {booking.status === 'paid' && booking.bookingCode && (
++                  <div className="mt-6 flex flex-wrap items-center gap-5 border-t border-slate-200 pt-6">
++                    {/* eslint-disable-next-line @next/next/no-img-element */}
++                    <img
++                      src={`/api/v1/bookings/${booking._id}/ticket?format=png`}
++                      alt={`QR code for ticket ${booking.bookingCode}`}
++                      width={120}
++                      height={120}
++                      className="h-[120px] w-[120px] border border-slate-200 bg-white p-1"
++                    />
++                    <div className="flex flex-col items-start gap-2">
++                      {booking.checkedIn ? (
++                        <span className="border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-700">
++                          Entry used
++                        </span>
++                      ) : (
++                        <p className="text-xs font-medium text-slate-500">Show this QR at the entrance.</p>
++                      )}
++                      <a
++                        href={`/api/v1/bookings/${booking._id}/ticket`}
++                        className="text-xs font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-800"
++                      >
++                        Download PDF ticket
++                      </a>
++                      {!booking.checkedIn && (
++                        <button
++                          onClick={() => cancelBooking(booking)}
++                          disabled={cancelling === booking._id}
++                          className="text-xs font-black uppercase tracking-widest text-rose-600 hover:text-rose-800 disabled:opacity-40"
++                        >
++                          {cancelling === booking._id ? 'Checking…' : 'Cancel & refund'}
++                        </button>
++                      )}
++                    </div>
++                  </div>
++                )}
++
++                {booking.status === 'refunded' && booking.refundAmount !== undefined && (
++                  <p className="mt-5 border border-slate-300 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
++                    Refunded ₹{booking.refundAmount}
++                    {booking.refundAmount < booking.amount ? ` of ₹${booking.amount} (per refund policy)` : ''}.
++                  </p>
++                )}
++
+                 {booking.status === 'failed' && booking.failureReason && (
+                   <p className="mt-5 border border-rose-300 bg-rose-50/80 p-3 text-xs font-semibold text-rose-700">
+                     ⚠ {booking.failureReason}
+diff --git a/app/bookshow/page.js b/app/bookshow/page.js
+index 5ceb5b2..4ac021f 100644
+--- a/app/bookshow/page.js
++++ b/app/bookshow/page.js
+@@ -121,6 +121,7 @@ function BookShow() {
+     return (
+       <BookingConfirmed
+         code={confirmation.bookingCode}
++        bookingId={confirmation.bookingId}
+         seats={confirmation.seatNumbers || []}
+         eventId={eventId}
+         city={event?.city}
+diff --git a/components/booking/BookingConfirmed.jsx b/components/booking/BookingConfirmed.jsx
+index 1c95202..0e9bcc3 100644
+--- a/components/booking/BookingConfirmed.jsx
++++ b/components/booking/BookingConfirmed.jsx
+@@ -1,16 +1,26 @@
+ import Link from 'next/link'
+ import Suggestions from '../Suggestions.jsx'
+ 
+-export default function BookingConfirmed({ code, seats = [], eventId, city, onAnother }) {
++export default function BookingConfirmed({ code, bookingId, seats = [], eventId, city, onAnother }) {
+   return (
+     <main className="flex min-h-screen items-center justify-center bg-sand px-6 text-ink">
+       <div className="w-full max-w-md py-12 text-center">
+         <p className="font-display text-sm font-semibold text-ocean">Payment confirmed</p>
+         <h1 className="mt-4 font-display text-5xl font-black uppercase tracking-tight">You&apos;re going.</h1>
+-        <p className="mt-4 text-sm text-ink/60">Show this code at the venue entrance.</p>
++        <p className="mt-4 text-sm text-ink/60">Show this QR (or the code) at the venue entrance. A PDF copy is on its way to your email.</p>
+         <p className="mt-6 rounded-2xl border border-coral/15 bg-white px-6 py-5 font-display text-3xl font-black tracking-[0.2em] text-coral">
+           {code}
+         </p>
++        {bookingId && (
++          // eslint-disable-next-line @next/next/no-img-element
++          <img
++            src={`/api/v1/bookings/${bookingId}/ticket?format=png`}
++            alt={`QR code for ticket ${code}`}
++            width={180}
++            height={180}
++            className="mx-auto mt-4 h-[180px] w-[180px] rounded-xl border border-coral/15 bg-white p-2"
++          />
++        )}
+         {seats.length > 0 && (
+           <p className="mt-4 text-sm text-ink/60">
+             Seats: <span className="font-semibold text-ink">{seats.join(', ')}</span>
+diff --git a/lib/adminBookings.js b/lib/adminBookings.js
+new file mode 100644
+index 0000000..87f08a1
+--- /dev/null
++++ b/lib/adminBookings.js
+@@ -0,0 +1,39 @@
++import mongoose from 'mongoose'
++import User from '../models/User'
++
++const STATUSES = ['created', 'processing', 'paid', 'expired', 'failed', 'refunding', 'refunded']
++const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
++
++/** Query-string filters shared by the bookings list and the CSV export. */
++export async function bookingFilterFrom(searchParams) {
++  const filter = {}
++
++  const event = searchParams.get('event')
++  if (event && mongoose.isValidObjectId(event)) filter.event = event
++
++  const status = searchParams.get('status')
++  if (status === 'active') filter.status = { $in: ['paid', 'refunded', 'failed', 'refunding'] } // hides abandoned checkouts
++  else if (STATUSES.includes(status)) filter.status = status
++
++  const checked = searchParams.get('checkedIn')
++  if (checked === 'yes') filter.checkedIn = true
++  if (checked === 'no') filter.checkedIn = { $ne: true }
++
++  const from = searchParams.get('from')
++  const to = searchParams.get('to')
++  if (from || to) {
++    filter.createdAt = {}
++    if (from && !Number.isNaN(Date.parse(from))) filter.createdAt.$gte = new Date(from)
++    if (to && !Number.isNaN(Date.parse(to))) filter.createdAt.$lte = new Date(`${to}T23:59:59.999Z`)
++    if (!Object.keys(filter.createdAt).length) delete filter.createdAt
++  }
++
++  const q = (searchParams.get('q') || '').trim().slice(0, 60)
++  if (q) {
++    const rx = new RegExp(escapeRegex(q), 'i')
++    const users = await User.find({ $or: [{ name: rx }, { email: rx }] }).select('_id').limit(200).lean()
++    filter.$or = [{ bookingCode: rx }, { user: { $in: users.map((u) => u._id) } }]
++  }
++
++  return filter
++}
+diff --git a/lib/bookingService.js b/lib/bookingService.js
+index ffe8f34..787467e 100644
+--- a/lib/bookingService.js
++++ b/lib/bookingService.js
+@@ -11,6 +11,22 @@ const makeBookingCode = () => `QP${crypto.randomBytes(4).toString('hex').toUpper
+ const isDuplicateKey = (err) => err?.code === 11000 || err?.writeErrors?.some?.((e) => e.code === 11000)
+ const PROCESSING_STALE_MS = 60_000
+ 
++/**
++ * Email the ticket (QR + PDF) once a booking is paid. Queued with retries so a slow/failed SMTP never
++ * delays or breaks the payment confirmation. If the queue itself is down, try once in the background.
++ */
++async function queueTicketEmail(bookingId) {
++  const queued = await enqueue(
++    'ticket-email',
++    { bookingId },
++    { jobId: `ticket-email-${bookingId}`, attempts: 5, backoff: { type: 'exponential', delay: 10_000 } }
++  )
++  if (queued) return
++  import('./tickets')
++    .then((m) => m.sendTicketEmail(bookingId))
++    .catch((err) => console.error('[ticket-email] fallback failed:', err.message))
++}
++
+ function summary(b) {
+   return {
+     status: b.status,
+@@ -109,6 +125,7 @@ export async function confirmPayment({ orderId, paymentId, userId }) {
+     )
+   }
+ 
++  await queueTicketEmail(String(paid._id))
+   return summary(paid)
+ }
+ 
+@@ -138,6 +155,7 @@ async function finishCountOnly(claimed) {
+     { $set: { status: 'paid', bookingCode: claimed.bookingCode || makeBookingCode() } },
+     { new: true }
+   )
++  await queueTicketEmail(String(paid._id))
+   return summary(paid)
+ }
+ 
+diff --git a/lib/mailer.js b/lib/mailer.js
+index 22b7c58..8f5e9a0 100644
+--- a/lib/mailer.js
++++ b/lib/mailer.js
+@@ -19,8 +19,10 @@ function getTransport() {
+   return transporter
+ }
+ 
++export const mailConfigured = () => Boolean(process.env.SMTP_USER && process.env.SMTP_PASS)
++
+ /** Never throws — returns true only when the mail was really handed to SMTP. */
+-export async function sendMail({ to, subject, html, text }) {
++export async function sendMail({ to, subject, html, text, attachments }) {
+   const transport = getTransport()
+   if (!transport) {
+     console.warn('[mail] SMTP_USER / SMTP_PASS not set — email skipped')
+@@ -33,7 +35,8 @@ export async function sendMail({ to, subject, html, text }) {
+       to,
+       subject,
+       text,
+-      html
++      html,
++      attachments
+     })
+     return true
+   } catch (err) {
+diff --git a/lib/refundPolicy.js b/lib/refundPolicy.js
+new file mode 100644
+index 0000000..d7f7628
+--- /dev/null
++++ b/lib/refundPolicy.js
+@@ -0,0 +1,56 @@
++/**
++ * Refund policy for tickets cancelled by the customer. PURE (no DB, no Next) so it can be unit-tested
++ * and shown identically in the UI preview and at refund time.
++ *
++ * Tiers are checked top-down; the first whose `minHours` is <= hours left until the show starts wins.
++ * Below the last tier (or once the show has started) a customer can no longer cancel.
++ * Admins can always refund 100% by hand (see lib/refunds.js) — this policy only limits customers.
++ *
++ * Change the numbers here to change the policy everywhere.
++ */
++export const REFUND_TIERS = [
++  { minHours: 48, percent: 100 },
++  { minHours: 24, percent: 50 }
++]
++
++export const POLICY_TEXT =
++  '100% refund up to 48 hours before the show, 50% refund from 48 to 24 hours before, ' +
++  'no refund (and no cancellation) within 24 hours of the show.'
++
++const HOUR = 60 * 60 * 1000
++
++/**
++ * @param {{status:string, amount:number, checkedIn?:boolean}} booking
++ * @param {{date?:Date|string|null}|null} event
++ * @returns {{allowed:boolean, percent:number, refundAmount:number, reason?:string, hoursLeft:number|null}}
++ */
++export function refundQuote(booking, event, now = new Date()) {
++  const no = (reason, hoursLeft = null) => ({ allowed: false, percent: 0, refundAmount: 0, reason, hoursLeft })
++
++  if (booking.status !== 'paid') return no('Only confirmed tickets can be cancelled.')
++  if (booking.checkedIn) return no('This ticket was already used for entry.')
++
++  const start = event?.date ? new Date(event.date) : null
++  if (!start || Number.isNaN(start.getTime())) {
++    // No start time on the event: nothing to measure against, so allow a full refund.
++    return { allowed: true, percent: 100, refundAmount: round2(booking.amount), hoursLeft: null }
++  }
++
++  const hoursLeft = (start.getTime() - now.getTime()) / HOUR
++  if (hoursLeft <= 0) return no('This show has already started.', hoursLeft)
++
++  const tier = REFUND_TIERS.find((t) => hoursLeft >= t.minHours)
++  if (!tier) return no('Cancellations close 24 hours before the show.', hoursLeft)
++
++  return {
++    allowed: true,
++    percent: tier.percent,
++    refundAmount: round2((booking.amount * tier.percent) / 100),
++    hoursLeft
++  }
++}
++
++const round2 = (n) => Math.round(n * 100) / 100
++
++/** Razorpay wants integer paise. */
++export const toPaise = (rupees) => Math.round(rupees * 100)
+diff --git a/lib/refunds.js b/lib/refunds.js
+new file mode 100644
+index 0000000..45bcc1e
+--- /dev/null
++++ b/lib/refunds.js
+@@ -0,0 +1,139 @@
++import { connectDB } from './mongodb'
++import Booking from '../models/Booking'
++import BookedSeat from '../models/BookedSeat'
++import Event from '../models/Event'
++import { ApiError } from './api'
++import { razorpay } from './razorpay'
++import { enqueue } from './queue'
++import { bustCache } from './redis'
++import { unmarkSeatsBooked } from './seatStore'
++import { refundQuote, toPaise } from './refundPolicy'
++
++const RETRY = { attempts: 6, backoff: { type: 'exponential', delay: 5000 } }
++
++async function loadForRefund(bookingId, by, userId) {
++  const filter = { _id: bookingId }
++  if (by === 'user') filter.user = userId // a customer can only ever touch their own booking
++  const booking = await Booking.findOne(filter)
++  if (!booking) throw new ApiError(404, 'Booking not found')
++  const event = await Event.findById(booking.event).select('date totalSeats title').lean()
++  return { booking, event }
++}
++
++/** What would a cancellation refund right now? (customer policy, or 100% for an admin) */
++export async function quoteFor({ bookingId, by, userId }) {
++  await connectDB()
++  const { booking, event } = await loadForRefund(bookingId, by, userId)
++  if (by === 'admin') {
++    const ok = booking.status === 'paid'
++    return {
++      allowed: ok,
++      percent: ok ? 100 : 0,
++      refundAmount: ok ? booking.amount : 0,
++      reason: ok ? undefined : 'Only confirmed (paid) bookings can be refunded.',
++      hoursLeft: null
++    }
++  }
++  return refundQuote(booking, event)
++}
++
++/**
++ * Cancels a PAID booking and refunds it through Razorpay, then puts the seats back on sale.
++ *
++ *  - by 'user'  -> refund follows lib/refundPolicy.js (tiers; not after check-in / show start)
++ *  - by 'admin' -> always 100%, any paid booking (manual refund button)
++ *
++ * paid -> refunding is one atomic update, so a double click or a user+admin race can't refund twice.
++ * If Razorpay rejects the refund the booking goes back to 'paid' and the error is thrown, so it can be retried.
++ */
++export async function cancelAndRefund({ bookingId, by, userId }) {
++  await connectDB()
++  const { booking, event } = await loadForRefund(bookingId, by, userId)
++
++  const quote =
++    by === 'admin'
++      ? { allowed: booking.status === 'paid', percent: 100, refundAmount: booking.amount, reason: 'Only confirmed (paid) bookings can be refunded.' }
++      : refundQuote(booking, event)
++  if (!quote.allowed) throw new ApiError(409, quote.reason || 'This booking cannot be cancelled', { code: 'NOT_REFUNDABLE' })
++  if (!booking.razorpayPaymentId) throw new ApiError(409, 'No payment is recorded for this booking')
++
++  const claimFilter = { _id: booking._id, status: 'paid' }
++  if (by === 'user') claimFilter.checkedIn = { $ne: true }
++  const claimed = await Booking.findOneAndUpdate(claimFilter, { $set: { status: 'refunding' } }, { new: true })
++  if (!claimed) throw new ApiError(409, 'This booking was just changed (already cancelled or used). Refresh and check again.')
++
++  let refundId
++  try {
++    const r = await razorpay().payments.refund(claimed.razorpayPaymentId, {
++      amount: toPaise(quote.refundAmount),
++      receipt: `rf_${claimed._id}`,
++      notes: { reason: `${by}_cancel`, bookingId: String(claimed._id), percent: String(quote.percent) }
++    })
++    refundId = r.id
++  } catch (err) {
++    const msg = err?.error?.description || err?.message || ''
++    if (!/fully refunded/i.test(msg)) {
++      await Booking.updateOne({ _id: claimed._id, status: 'refunding' }, { $set: { status: 'paid' } }) // let them retry
++      console.error('[refund] razorpay rejected', String(claimed._id), msg)
++      throw new ApiError(502, 'The refund could not be processed right now. Nothing was changed — please try again shortly.')
++    }
++    // Razorpay says it is already fully refunded (e.g. done from their dashboard): finish our side.
++  }
++
++  const done = await Booking.findByIdAndUpdate(
++    claimed._id,
++    {
++      $set: {
++        status: 'refunded',
++        refundId,
++        refundAmount: quote.refundAmount,
++        cancelledAt: new Date(),
++        cancelledBy: by
++      }
++    },
++    { new: true }
++  )
++
++  await releaseSoldSeats(done)
++  await enqueue('refund-email', { bookingId: String(done._id) }, { jobId: `refund-email-${done._id}`, ...RETRY })
++
++  return {
++    status: done.status,
++    bookingId: done._id,
++    refundAmount: done.refundAmount,
++    refundId: done.refundId || null,
++    percent: quote.percent
++  }
++}
++
++/** Seats of a cancelled booking go back on sale: MongoDB (truth), the counter, then the Redis mirror. */
++async function releaseSoldSeats(booking) {
++  const named = booking.seatNumbers?.length > 0
++  const count = named ? booking.seatNumbers.length : booking.seats
++
++  if (named) await BookedSeat.deleteMany({ booking: booking._id })
++
++  // Named seats: confirmPayment() marked the booking `seatsCounted` when it subtracted them; undo exactly once.
++  // Count-only shows never set that flag, and the paid -> refunding claim above already guarantees "once".
++  const shouldRestore = named
++    ? (await Booking.updateOne({ _id: booking._id, seatsCounted: true }, { $set: { seatsCounted: false } })).modifiedCount > 0
++    : true
++  if (shouldRestore) {
++    await Event.updateOne({ _id: booking.event }, [
++      { $set: { availableSeats: { $min: ['$totalSeats', { $add: ['$availableSeats', count] }] } } }
++    ])
++    await bustCache()
++  }
++
++  if (named) {
++    try {
++      await unmarkSeatsBooked(String(booking.event), booking.seatNumbers)
++    } catch {
++      await enqueue(
++        'sync-unbooked',
++        { eventId: String(booking.event), seatIds: booking.seatNumbers },
++        { attempts: 10, backoff: { type: 'exponential', delay: 2000 } }
++      )
++    }
++  }
++}
+diff --git a/lib/seatCore.cjs b/lib/seatCore.cjs
+index d99cfc8..29b934a 100644
+--- a/lib/seatCore.cjs
++++ b/lib/seatCore.cjs
+@@ -112,6 +112,12 @@ function createSeatStore(redis) {
+       return redis.seatBook(k.booked, k.holds, k.holdby, ...seatIds)
+     },
+ 
++    /** A paid ticket was cancelled/refunded: put the seats back on sale. */
++    async unmarkBooked(showId, seatIds) {
++      const k = keysFor(showId)
++      return redis.srem(k.booked, ...seatIds)
++    },
++
+     async snapshot(showId) {
+       const k = keysFor(showId)
+       const [booked, held] = await redis.seatSnapshot(k.booked, k.holds, k.holdby)
+diff --git a/lib/seatStore.js b/lib/seatStore.js
+index bbf6f7d..19117c2 100644
+--- a/lib/seatStore.js
++++ b/lib/seatStore.js
+@@ -96,6 +96,12 @@ export async function markSeatsBooked(eventId, seatIds) {
+   await publishSeatUpdate(eventId, 'book', seatIds)
+ }
+ 
++/** Throws on failure so the caller can queue a retry. */
++export async function unmarkSeatsBooked(eventId, seatIds) {
++  await store().unmarkBooked(eventId, seatIds)
++  await publishSeatUpdate(eventId, 'release', seatIds)
++}
++
+ /** { booked, held, degraded } — falls back to MongoDB (without live holds) if Redis is down. */
+ export async function getSeatMap(eventId) {
+   try {
+diff --git a/lib/tickets.js b/lib/tickets.js
+new file mode 100644
+index 0000000..2474fbe
+--- /dev/null
++++ b/lib/tickets.js
+@@ -0,0 +1,155 @@
++import QRCode from 'qrcode'
++import PDFDocument from 'pdfkit'
++import { connectDB } from './mongodb'
++import { sendMail, mailConfigured } from './mailer'
++import Booking from '../models/Booking'
++
++/**
++ * The QR simply encodes the booking code. The code alone grants nothing: the scanner endpoint
++ * is admin-only and checks the booking (paid, not refunded, not already used) in the database.
++ */
++export function qrPng(code, width = 360) {
++  return QRCode.toBuffer(code, { width, margin: 1, errorCorrectionLevel: 'M', type: 'png' })
++}
++
++const esc = (s = '') =>
++  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
++
++const when = (d) =>
++  d
++    ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })
++    : 'To be announced'
++
++// pdfkit's built-in fonts have no ₹ glyph, so the PDF uses "Rs."
++const rs = (n) => `Rs. ${Number(n || 0).toLocaleString('en-IN')}`
++
++/** Ticket PDF as a Buffer. `booking.event` and `booking.user` must be populated. */
++export async function buildTicketPdf(booking) {
++  const { event = {}, user = {} } = booking
++  const png = await qrPng(booking.bookingCode, 480)
++  const seats = booking.seatNumbers?.length ? booking.seatNumbers.join(', ') : `${booking.seats} x General Admission`
++
++  const doc = new PDFDocument({ size: 'A5', margin: 36, info: { Title: `QPIE ticket ${booking.bookingCode}` } })
++  const chunks = []
++  doc.on('data', (c) => chunks.push(c))
++  const done = new Promise((resolve, reject) => {
++    doc.on('end', () => resolve(Buffer.concat(chunks)))
++    doc.on('error', reject)
++  })
++
++  const W = doc.page.width
++  doc.rect(0, 0, W, 70).fill('#FF6B5B')
++  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(24).text('QPIE', 36, 24)
++  doc.fontSize(10).font('Helvetica').text('ENTRY PASS', 36, 30, { align: 'right', width: W - 72 })
++
++  doc.fillColor('#111').font('Helvetica-Bold').fontSize(20).text(event.title || 'Event', 36, 95, { width: W - 72 })
++  doc.moveDown(0.4).font('Helvetica').fontSize(11).fillColor('#444')
++  doc.text(when(event.date))
++  doc.text([event.venue, event.city].filter(Boolean).join(', ') || 'Venue to be announced')
++
++  doc.moveDown(1)
++  const label = (k, v) => {
++    doc.font('Helvetica').fontSize(8).fillColor('#888').text(k.toUpperCase())
++    doc.font('Helvetica-Bold').fontSize(12).fillColor('#111').text(v)
++    doc.moveDown(0.4)
++  }
++  label('Name', user.name || '-')
++  label('Seats', seats)
++  label('Amount paid', rs(booking.amount))
++
++  const qrSize = 150
++  doc.image(png, (W - qrSize) / 2, doc.y + 6, { width: qrSize })
++  doc.y += qrSize + 14
++  doc.font('Courier-Bold').fontSize(18).fillColor('#FF6B5B').text(booking.bookingCode, { align: 'center', characterSpacing: 3 })
++  doc.font('Helvetica').fontSize(8).fillColor('#888').text('Show this QR code at the venue entrance. One scan = one entry.', { align: 'center' })
++
++  doc.end()
++  return done
++}
++
++function ticketEmailContent(b, png) {
++  const e = b.event || {}
++  const seats = b.seatNumbers?.length ? b.seatNumbers.join(', ') : `${b.seats} ticket${b.seats > 1 ? 's' : ''}`
++  const subject = `Your QPIE ticket — ${e.title || 'your show'} (${b.bookingCode})`
++  const text =
++    `Hi ${b.user?.name || ''},\n\nYour booking is confirmed.\n\n${e.title || ''}\n${when(e.date)}\n` +
++    `${[e.venue, e.city].filter(Boolean).join(', ')}\nSeats: ${seats}\nTicket code: ${b.bookingCode}\n\n` +
++    `Your ticket (QR code) is attached as a PDF. Show it at the entrance.`
++  const html = `
++    <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:28px;background:#FFF6E8;color:#2B1B12;border-radius:16px">
++      <h1 style="margin:0 0 4px;font-size:26px">You're going 🎟️</h1>
++      <p style="margin:0 0 20px;color:#6b5a4e">Booking confirmed, ${esc(b.user?.name || '')}.</p>
++      <div style="background:#fff;border-radius:12px;padding:20px">
++        <h2 style="margin:0 0 6px;font-size:20px">${esc(e.title)}</h2>
++        <p style="margin:0;line-height:1.6">${esc(when(e.date))}<br>${esc([e.venue, e.city].filter(Boolean).join(', '))}</p>
++        <p style="margin:12px 0 0"><b>Seats:</b> ${esc(seats)}</p>
++        <div style="text-align:center;margin-top:16px">
++          <img src="cid:ticket-qr" width="200" height="200" alt="Ticket QR code" style="display:block;margin:auto">
++          <p style="margin:10px 0 0;font:bold 22px 'Courier New',monospace;letter-spacing:4px;color:#FF6B5B">${esc(b.bookingCode)}</p>
++        </div>
++      </div>
++      <p style="margin:16px 0 0;font-size:13px;color:#6b5a4e">A PDF copy is attached. Show the QR code at the entrance — each ticket works once.</p>
++    </div>`
++  return { subject, text, html }
++}
++
++async function loadBooking(bookingId) {
++  await connectDB()
++  return Booking.findById(bookingId)
++    .populate('event', 'title venue city date')
++    .populate('user', 'name email')
++    .lean()
++}
++
++/**
++ * Sends the ticket email (QR inline + PDF attached). Safe to call twice: it stops once
++ * `ticketEmailSentAt` is set. THROWS when SMTP fails so the queue job retries with backoff.
++ */
++export async function sendTicketEmail(bookingId) {
++  const b = await loadBooking(bookingId)
++  if (!b || b.status !== 'paid' || !b.bookingCode || !b.user?.email) return 'skipped'
++  if (b.ticketEmailSentAt) return 'already-sent'
++  if (!mailConfigured()) return 'smtp-not-configured'
++
++  const [png, pdf] = await Promise.all([qrPng(b.bookingCode), buildTicketPdf(b)])
++  const { subject, text, html } = ticketEmailContent(b, png)
++
++  const sent = await sendMail({
++    to: b.user.email,
++    subject,
++    text,
++    html,
++    attachments: [
++      { filename: 'ticket-qr.png', content: png, cid: 'ticket-qr', contentType: 'image/png' },
++      { filename: `QPIE-ticket-${b.bookingCode}.pdf`, content: pdf, contentType: 'application/pdf' }
++    ]
++  })
++  if (!sent) throw new Error('ticket email could not be sent')
++
++  await Booking.updateOne({ _id: b._id }, { $set: { ticketEmailSentAt: new Date() } })
++  return 'sent'
++}
++
++/** Cancellation / refund confirmation. Throws on SMTP failure (queue retries). */
++export async function sendRefundEmail(bookingId) {
++  const b = await loadBooking(bookingId)
++  if (!b || b.status !== 'refunded' || !b.user?.email || !b.cancelledBy) return 'skipped'
++  if (!mailConfigured()) return 'smtp-not-configured'
++
++  const amount = b.refundAmount ?? b.amount
++  const sent = await sendMail({
++    to: b.user.email,
++    subject: `Booking cancelled — ${b.event?.title || 'your show'} (${b.bookingCode})`,
++    text:
++      `Hi ${b.user.name},\n\nYour booking ${b.bookingCode} for ${b.event?.title || 'the show'} was cancelled.\n` +
++      `Refund: ${rs(amount)} to your original payment method (usually 5-7 working days).`,
++    html: `
++      <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:28px;background:#FFF6E8;color:#2B1B12;border-radius:16px">
++        <h1 style="margin:0 0 12px;font-size:24px">Booking cancelled</h1>
++        <p style="line-height:1.6;margin:0">Your booking <b>${esc(b.bookingCode)}</b> for <b>${esc(b.event?.title)}</b> was cancelled.</p>
++        <p style="line-height:1.6;margin:12px 0 0">Refund of <b>${esc(rs(amount))}</b> is on its way to your original payment method (usually 5–7 working days).</p>
++      </div>`
++  })
++  if (!sent) throw new Error('refund email could not be sent')
++  return 'sent'
++}
+diff --git a/lib/worker.js b/lib/worker.js
+index c297a76..09a9d18 100644
+--- a/lib/worker.js
++++ b/lib/worker.js
+@@ -3,7 +3,7 @@ import { newConnection } from './redis'
+ import { connectDB } from './mongodb'
+ import { QUEUE_NAME ,bookingQueue } from './queue'
+ import { razorpay } from './razorpay'
+-import { releaseSeats, markSeatsBooked } from './seatStore'
++import { releaseSeats, markSeatsBooked, unmarkSeatsBooked } from './seatStore'
+ import Booking from '../models/Booking'
+ 
+ /** Hold ran out and nobody paid: close the booking and free the seats. */
+@@ -69,6 +69,22 @@ async function syncBooked({ eventId, seatIds }) {
+   await markSeatsBooked(eventId, seatIds)
+ }
+ 
++/** Redis missed the "seat is free again" update after a cancellation — replay it. */
++async function syncUnbooked({ eventId, seatIds }) {
++  await unmarkSeatsBooked(eventId, seatIds)
++}
++
++// tickets.js pulls in qrcode + pdfkit, so load it only when a mail job actually runs.
++async function ticketEmail({ bookingId }) {
++  const { sendTicketEmail } = await import('./tickets')
++  return sendTicketEmail(bookingId)
++}
++
++async function refundEmail({ bookingId }) {
++  const { sendRefundEmail } = await import('./tickets')
++  return sendRefundEmail(bookingId)
++}
++
+ async function processor(job) {
+   switch (job.name) {
+     case 'expire-hold':
+@@ -77,6 +93,12 @@ async function processor(job) {
+       return refund(job.data)
+     case 'sync-booked':
+       return syncBooked(job.data)
++    case 'sync-unbooked':
++      return syncUnbooked(job.data)
++    case 'ticket-email':
++      return ticketEmail(job.data)
++    case 'refund-email':
++      return refundEmail(job.data)
+     case 'sweep-refunds':
+       return sweepRefunds()
+     default:
+diff --git a/models/Booking.js b/models/Booking.js
+index 61f919a..95ba24d 100644
+--- a/models/Booking.js
++++ b/models/Booking.js
+@@ -16,10 +16,11 @@ const BookingSchema = new mongoose.Schema(
+     // paid       -> ticket issued
+     // expired    -> hold ran out / checkout closed (a late payment is still honoured if the seats are free)
+     // failed     -> paid but the seats were lost; refund queued
+-    // refunded   -> refund issued
++    // refunding  -> a cancel/refund is in flight (claimed so it can't run twice)
++    // refunded   -> refund issued (also used for cancelled tickets; see cancelledBy)
+     status: {
+       type: String,
+-      enum: ['created', 'processing', 'paid', 'expired', 'failed', 'refunded'],
++      enum: ['created', 'processing', 'paid', 'expired', 'failed', 'refunding', 'refunded'],
+       default: 'created',
+       index: true
+     },
+@@ -34,7 +35,17 @@ const BookingSchema = new mongoose.Schema(
+     razorpayOrderId: { type: String, required: true, unique: true },
+     razorpayPaymentId: String,
+     refundId: String,
+-    failureReason: String
++    refundAmount: { type: Number, min: 0 }, // rupees actually refunded (can be < amount under the policy)
++    cancelledAt: Date,
++    cancelledBy: { type: String, enum: ['user', 'admin'] },
++    failureReason: String,
++
++    // Entry scan at the venue (admin /admin/scan). One ticket code = one entry.
++    checkedIn: { type: Boolean, default: false, index: true },
++    checkedInAt: Date,
++    checkedInBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
++
++    ticketEmailSentAt: Date
+   },
+   { timestamps: true }
+ )
+diff --git a/next.config.js b/next.config.js
+index 4898082..9872f6b 100644
+--- a/next.config.js
++++ b/next.config.js
+@@ -6,7 +6,7 @@ const nextConfig = {
+     // Runs instrumentation.js on boot (starts the booking queue worker).
+     instrumentationHook: true,
+     // Keep these as plain Node requires instead of bundling them.
+-    serverComponentsExternalPackages: ['ioredis', 'bullmq']
++    serverComponentsExternalPackages: ['ioredis', 'bullmq', 'pdfkit', 'qrcode']
+   },
+ 
+   images: {
+@@ -23,7 +23,8 @@ const nextConfig = {
+       { key: 'X-Content-Type-Options', value: 'nosniff' },
+       { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+       { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+-      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
++      // camera=(self): the organiser check-in scanner (/admin/scan) needs the camera.
++      { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
+       // Only takes effect over https; no includeSubDomains so other subdomains can't be locked out by accident.
+       { key: 'Strict-Transport-Security', value: 'max-age=15552000' }
+     ]
+diff --git a/package.json b/package.json
+index a163816..617873e 100644
+--- a/package.json
++++ b/package.json
+@@ -17,9 +17,12 @@
+     "gsap": "^3.12.5",
+     "ioredis": "^6.0.0",
+     "jose": "^5.6.3",
++    "jsqr": "^1.4.0",
+     "mongoose": "^8.5.1",
+     "next": "^14.2.5",
+     "nodemailer": "^10.0.16",
++    "pdfkit": "^0.15.2",
++    "qrcode": "^1.5.4",
+     "razorpay": "^2.9.4",
+     "react": "^18.3.1",
+     "react-dom": "^18.3.1"
+-- 
+2.43.0
+

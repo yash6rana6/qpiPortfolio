@@ -1,16 +1,26 @@
 import Link from 'next/link'
 import Suggestions from '../Suggestions.jsx'
 
-export default function BookingConfirmed({ code, seats = [], eventId, city, onAnother }) {
+export default function BookingConfirmed({ code, bookingId, seats = [], eventId, city, onAnother }) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-sand px-6 text-ink">
       <div className="w-full max-w-md py-12 text-center">
         <p className="font-display text-sm font-semibold text-ocean">Payment confirmed</p>
         <h1 className="mt-4 font-display text-5xl font-black uppercase tracking-tight">You&apos;re going.</h1>
-        <p className="mt-4 text-sm text-ink/60">Show this code at the venue entrance.</p>
+        <p className="mt-4 text-sm text-ink/60">Show this QR (or the code) at the venue entrance. A PDF copy is on its way to your email.</p>
         <p className="mt-6 rounded-2xl border border-coral/15 bg-white px-6 py-5 font-display text-3xl font-black tracking-[0.2em] text-coral">
           {code}
         </p>
+        {bookingId && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`/api/v1/bookings/${bookingId}/ticket?format=png`}
+            alt={`QR code for ticket ${code}`}
+            width={180}
+            height={180}
+            className="mx-auto mt-4 h-[180px] w-[180px] rounded-xl border border-coral/15 bg-white p-2"
+          />
+        )}
         {seats.length > 0 && (
           <p className="mt-4 text-sm text-ink/60">
             Seats: <span className="font-semibold text-ink">{seats.join(', ')}</span>

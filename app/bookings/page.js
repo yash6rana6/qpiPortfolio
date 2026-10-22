@@ -11,6 +11,7 @@ const STATUS_STYLE = {
   created: 'border-amber-500/30 bg-amber-500/10 text-amber-700 shadow-sm',
   processing: 'border-sky-500/30 bg-sky-500/10 text-sky-700 shadow-sm',
   refunded: 'border-slate-500/30 bg-slate-500/10 text-slate-600 shadow-sm',
+  refunding: 'border-sky-500/30 bg-sky-500/10 text-sky-700 shadow-sm',
   failed: 'border-rose-500/30 bg-rose-500/10 text-rose-700 shadow-sm'
 }
 
@@ -19,6 +20,7 @@ const STATUS_LABEL = {
   created: 'PAYMENT PENDING',
   processing: 'PROCESSING',
   refunded: 'REFUNDED',
+  refunding: 'REFUNDING',
   failed: 'PAYMENT FAILED'
 }
 
@@ -28,6 +30,8 @@ export default function BookingsPage() {
 
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
+  const [cancelling, setCancelling] = useState(null)
+  const [notice, setNotice] = useState('')
 
   useEffect(() => {
     if (authLoading) return
@@ -45,6 +49,37 @@ export default function BookingsPage() {
 
   if (authLoading || !user) {
     return <main className="min-h-screen bg-[#faf8f5]" />
+  }
+
+  async function cancelBooking(booking) {
+    setNotice('')
+    setCancelling(booking._id)
+    try {
+      const prev = await fetch(`/api/v1/bookings/${booking._id}/cancel`, { cache: 'no-store' })
+      const quote = await prev.json()
+      if (!prev.ok) throw new Error(quote.error || 'Could not check this booking')
+      if (!quote.allowed) {
+        setNotice(`${quote.reason} Refund policy: ${quote.policy}`)
+        return
+      }
+      const sure = window.confirm(
+        `Cancel this booking and get ₹${quote.refundAmount} back (${quote.percent}% refund)?\n\nRefund policy: ${quote.policy}\n\nThis cannot be undone.`
+      )
+      if (!sure) return
+
+      const res = await fetch(`/api/v1/bookings/${booking._id}/cancel`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Cancellation failed')
+
+      setBookings((list) =>
+        list.map((b) => (b._id === booking._id ? { ...b, status: 'refunded', refundAmount: data.refundAmount, cancelledBy: 'user' } : b))
+      )
+      setNotice(`Booking cancelled. ₹${data.refundAmount} is being refunded to your original payment method (usually 5–7 working days).`)
+    } catch (err) {
+      setNotice(err.message)
+    } finally {
+      setCancelling(null)
+    }
   }
 
   const lastPaid = bookings.find((b) => b.status === 'paid')
@@ -77,6 +112,12 @@ export default function BookingsPage() {
             QPIE TICKET PASS
           </span>
         </div>
+
+        {notice && (
+          <p role="status" className="mt-6 border border-indigo-200 bg-indigo-50 p-3 text-sm font-semibold text-indigo-800">
+            {notice}
+          </p>
+        )}
 
         <div className="mt-10 space-y-8">
           {loading && (
@@ -166,6 +207,50 @@ export default function BookingsPage() {
                     </span>
                   </div>
                 </div>
+
+                {booking.status === 'paid' && booking.bookingCode && (
+                  <div className="mt-6 flex flex-wrap items-center gap-5 border-t border-slate-200 pt-6">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/v1/bookings/${booking._id}/ticket?format=png`}
+                      alt={`QR code for ticket ${booking.bookingCode}`}
+                      width={120}
+                      height={120}
+                      className="h-[120px] w-[120px] border border-slate-200 bg-white p-1"
+                    />
+                    <div className="flex flex-col items-start gap-2">
+                      {booking.checkedIn ? (
+                        <span className="border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-700">
+                          Entry used
+                        </span>
+                      ) : (
+                        <p className="text-xs font-medium text-slate-500">Show this QR at the entrance.</p>
+                      )}
+                      <a
+                        href={`/api/v1/bookings/${booking._id}/ticket`}
+                        className="text-xs font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-800"
+                      >
+                        Download PDF ticket
+                      </a>
+                      {!booking.checkedIn && (
+                        <button
+                          onClick={() => cancelBooking(booking)}
+                          disabled={cancelling === booking._id}
+                          className="text-xs font-black uppercase tracking-widest text-rose-600 hover:text-rose-800 disabled:opacity-40"
+                        >
+                          {cancelling === booking._id ? 'Checking…' : 'Cancel & refund'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {booking.status === 'refunded' && booking.refundAmount !== undefined && (
+                  <p className="mt-5 border border-slate-300 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
+                    Refunded ₹{booking.refundAmount}
+                    {booking.refundAmount < booking.amount ? ` of ₹${booking.amount} (per refund policy)` : ''}.
+                  </p>
+                )}
 
                 {booking.status === 'failed' && booking.failureReason && (
                   <p className="mt-5 border border-rose-300 bg-rose-50/80 p-3 text-xs font-semibold text-rose-700">

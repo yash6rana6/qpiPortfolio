@@ -176,6 +176,14 @@ export default function AdminPage() {
         <p className="mt-2 text-sm text-zinc-500">
           Everything you publish here goes live on the site and opens for booking.
         </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Link href="/admin/analytics" className="rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-bold text-white">
+            Sales &amp; bookings
+          </Link>
+          <Link href="/admin/scan" className="rounded-xl border border-zinc-300 px-5 py-2.5 text-sm font-bold text-zinc-800">
+            Check-in scanner
+          </Link>
+        </div>
       </div>
 
       {error && (

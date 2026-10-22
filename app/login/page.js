@@ -236,7 +236,7 @@ function LoginForm() {
   const showEmailField = mode === 'login' || mode === 'register'
 
   return (
-    <main className="relative flex min-h-screen w-full items-center justify-end bg-[#0d060e] p-4 lg:p-8">
+    <main className="relative flex min-h-screen w-screen max-w-[100vw] items-center justify-end overflow-x-hidden overflow-y-auto bg-[#0d060e] p-4 lg:p-8">
       <div
         className="absolute inset-0 z-0 bg-cover bg-center"
         style={{ backgroundImage: `url('/signupForm.png')` }}

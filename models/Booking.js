@@ -16,10 +16,11 @@ const BookingSchema = new mongoose.Schema(
     // paid       -> ticket issued
     // expired    -> hold ran out / checkout closed (a late payment is still honoured if the seats are free)
     // failed     -> paid but the seats were lost; refund queued
-    // refunded   -> refund issued
+    // refunding  -> a cancel/refund is in flight (claimed so it can't run twice)
+    // refunded   -> refund issued (also used for cancelled tickets; see cancelledBy)
     status: {
       type: String,
-      enum: ['created', 'processing', 'paid', 'expired', 'failed', 'refunded'],
+      enum: ['created', 'processing', 'paid', 'expired', 'failed', 'refunding', 'refunded'],
       default: 'created',
       index: true
     },
@@ -34,7 +35,17 @@ const BookingSchema = new mongoose.Schema(
     razorpayOrderId: { type: String, required: true, unique: true },
     razorpayPaymentId: String,
     refundId: String,
-    failureReason: String
+    refundAmount: { type: Number, min: 0 }, // rupees actually refunded (can be < amount under the policy)
+    cancelledAt: Date,
+    cancelledBy: { type: String, enum: ['user', 'admin'] },
+    failureReason: String,
+
+    // Entry scan at the venue (admin /admin/scan). One ticket code = one entry.
+    checkedIn: { type: Boolean, default: false, index: true },
+    checkedInAt: Date,
+    checkedInBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
+    ticketEmailSentAt: Date
   },
   { timestamps: true }
 )
