@@ -86,3 +86,25 @@ html, body {
 .blend-ink-soft { color: rgba(255, 255, 255, 0.72); mix-blend-mode: difference; }
 /* coral on sand (difference of sand and this = #FF6B5B) */
 .blend-coral { color: rgb(0, 139, 141); mix-blend-mode: difference; }
+
+/* ---- Lucknow news (glassmorphism) ---- */
+
+.news-glass {
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 8px 32px rgba(43, 27, 18, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: background 0.4s, box-shadow 0.4s;
+}
+
+/* cards only (kept separate so buttons with their own transforms are not affected) */
+.news-lift { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), background 0.4s, box-shadow 0.4s; }
+.news-lift:hover {
+  transform: translateY(-4px);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 18px 42px rgba(43, 27, 18, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.news-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+.news-scroll::-webkit-scrollbar { display: none; }

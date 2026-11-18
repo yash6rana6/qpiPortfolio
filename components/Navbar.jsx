@@ -46,18 +46,18 @@ export default function Navbar({ tone = "overlay" }) {
   return (
     <header
       className={cn(
-        "fixed top-0 z-50 flex w-full items-center justify-between px-6 py-5 backdrop-blur-md md:px-16",
+        "fixed top-0 z-50 flex w-full items-center justify-between px-6 py-4 backdrop-blur-md md:px-16",
         t.bar,
       )}
     >
       <Link href="/" className="flex items-center gap-2">
         <Image
-          src="/logo.svg"
+          src="/logoff.svg"
           alt="QPIE Logo"
-          width={100}
-          height={32}
+          width={200}
+          height={64}
           priority
-          className="h-8 w-auto drop-shadow-[1px_1px_0px_rgba(255,255,255,0.9),_-1px_-1px_0px_rgba(0,0,0,0.6)]"
+          className="h-12 w-auto md:h-16 drop-shadow-[1px_1px_0px_rgba(255,255,255,0.9),_-1px_-1px_0px_rgba(0,0,0,0.6)]"
         />
       </Link>
       <nav className="flex items-center gap-6">
