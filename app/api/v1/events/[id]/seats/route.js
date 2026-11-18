@@ -15,7 +15,7 @@ export async function GET(_request, { params }) {
   try {
     if (!mongoose.isValidObjectId(params.id)) throw new ApiError(404, 'Event not found')
     await connectDB()
-    const event = await Event.findById(params.id).select('status totalSeats availableSeats')
+    const event = await Event.findById(params.id).select('status seating totalSeats availableSeats')
     if (!event || event.status !== 'published') throw new ApiError(404, 'Event not found')
     if (!hasSeatMap(event)) return ok({ total: event.totalSeats, mapped: false, taken: [] })
 

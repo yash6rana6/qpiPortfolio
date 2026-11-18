@@ -7,7 +7,7 @@ import seatCore from '../../../../../lib/seatCore.cjs'
 import { requireAdmin } from '../../../../../lib/auth'
 import { redis, bustCache } from '../../../../../lib/redis'
 import { pickEventFields } from '../../../../../lib/eventInput'
-import { allSeatLabels, hasSeatMap } from '../../../../../lib/seats'
+import { SEAT_MAP_LIMIT, allSeatLabels, hasSeatMap } from '../../../../../lib/seats'
 import { ok, fail, readJson, ApiError } from '../../../../../lib/api'
 
 export const dynamic = 'force-dynamic'
@@ -39,15 +39,34 @@ export async function PUT(request, { params }) {
     const body = await readJson(request)
     const data = pickEventFields(body)
 
-    const existing = await Event.findById(params.id).select('totalSeats availableSeats').lean()
+    const existing = await Event.findById(params.id).select('seating totalSeats availableSeats').lean()
     if (!existing) throw new ApiError(404, 'Event not found')
 
     const total = data.totalSeats ?? existing.totalSeats
     const available = data.availableSeats ?? existing.availableSeats
     if (available > total) throw new ApiError(400, 'Seats on sale cannot be more than total seats')
 
+    const seating = data.seating ?? existing.seating
+    if (seating === 'seated' && total > SEAT_MAP_LIMIT) {
+      throw new ApiError(400, `A seated event can have at most ${SEAT_MAP_LIMIT} seats. Use Unseated / General for bigger crowds.`)
+    }
+    if (seating === 'seated' && !(total > 0)) throw new ApiError(400, 'A seated event needs total seats (at least 1)')
+
+    // Seated <-> unseated changes how seats are stored, so it is only allowed before any ticket is sold.
+    const wasMapped = hasSeatMap(existing)
+    const willMap = hasSeatMap({ seating, totalSeats: total })
+    if (wasMapped !== willMap) {
+      const sold = await Booking.countDocuments({ event: params.id, status: { $in: ['paid', 'processing', 'refunding'] } })
+      if (sold > 0) {
+        throw new ApiError(
+          409,
+          'Tickets are already sold for this event, so its seating type (seated / unseated) can no longer be changed.'
+        )
+      }
+    }
+
     // Shrinking the hall must never orphan a seat that is already sold.
-    if (data.totalSeats !== undefined && data.totalSeats !== existing.totalSeats && hasSeatMap({ totalSeats: total })) {
+    if (data.totalSeats !== undefined && data.totalSeats !== existing.totalSeats && willMap) {
       const sold = await BookedSeat.find({ event: params.id }).select('seatId -_id').lean()
       if (sold.length) {
         const valid = new Set(allSeatLabels(total))

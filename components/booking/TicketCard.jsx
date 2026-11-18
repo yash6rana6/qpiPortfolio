@@ -53,7 +53,7 @@ export default function TicketCard({ event, qty, max, onChange, featured = true 
       </div>
 
       <div className="mt-4 border-t border-ink/10 pt-3 text-sm text-ink/60">
-        <p>This ticket grants entry to one individual.</p>
+        <p>Unseated event — no seat numbers. This ticket grants entry to one individual.</p>
         {low && <p className="mt-1 font-semibold text-coral">Only {event.availableSeats} left</p>}
       </div>
     </div>

@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '../../components/AuthProvider.jsx'
+import MediaField from '../../components/admin/MediaField.jsx'
 import { toDateTimeLocal } from '../../lib/utils.js'
+import { SEATS_PER_ROW, SEAT_MAP_LIMIT, hasSeatMap } from '../../lib/seats.js'
 
 const EMPTY_FORM = {
   title: '',
@@ -17,6 +19,7 @@ const EMPTY_FORM = {
   posterImage: '',
   videoUrl: '',
   accentColor: 'pink',
+  seating: 'seated',
   pricePerSeat: 0,
   totalSeats: 0,
   availableSeats: 0,
@@ -88,6 +91,8 @@ export default function AdminPage() {
     setForm({
       ...EMPTY_FORM,
       ...event,
+      // Old events have no seating field: show what they actually do today.
+      seating: event.seating || (hasSeatMap(event) ? 'seated' : 'general'),
       date: toDateTimeLocal(event.date),
       endDate: toDateTimeLocal(event.endDate)
     })
@@ -104,8 +109,14 @@ export default function AdminPage() {
 
   async function handleSave(e) {
     e.preventDefault()
-    setSaving(true)
     setError('')
+
+    const totalNum = Number(form.totalSeats) || 0
+    if (form.seating === 'seated' && (totalNum < 1 || totalNum > SEAT_MAP_LIMIT)) {
+      setError(`A seated event needs between 1 and ${SEAT_MAP_LIMIT} seats. For a bigger crowd choose Unseated / General.`)
+      return
+    }
+    setSaving(true)
 
     const payload = {
       ...form,
@@ -180,6 +191,9 @@ export default function AdminPage() {
           <Link href="/admin/analytics" className="rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-bold text-white">
             Sales &amp; bookings
           </Link>
+          <Link href="/admin/media" className="rounded-xl bg-[#FF6B5B] px-5 py-2.5 text-sm font-bold text-white">
+            Media library
+          </Link>
           <Link href="/admin/scan" className="rounded-xl border border-zinc-300 px-5 py-2.5 text-sm font-bold text-zinc-800">
             Check-in scanner
           </Link>
@@ -226,7 +240,11 @@ export default function AdminPage() {
                   </div>
                   <p className="truncate text-xs font-medium text-zinc-500">{event.venue}</p>
                   <p className="text-xs text-zinc-400">
-                    ₹{event.pricePerSeat} · {event.availableSeats}/{event.totalSeats} seats left
+                    <span className="mr-1.5 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-black uppercase text-zinc-600">
+                      {(event.seating || (hasSeatMap(event) ? 'seated' : 'general')) === 'seated' ? 'Seated' : 'Unseated'}
+                    </span>
+                    ₹{event.pricePerSeat} · {event.availableSeats}/{event.totalSeats}{' '}
+                    {(event.seating || (hasSeatMap(event) ? 'seated' : 'general')) === 'seated' ? 'seats' : 'tickets'} left
                     {event.status === 'draft' && ' · draft'}
                   </p>
                 </div>
@@ -287,13 +305,47 @@ export default function AdminPage() {
                 <input id="endDate" type="datetime-local" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className={field} />
               </div>
 
+              <div className="space-y-2 md:col-span-2">
+                <p className={labelClass}>Seating type</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {[
+                    ['seated', 'Seated', 'Customer picks exact seats (A1, B4…) on a live seat map'],
+                    ['general', 'Unseated / General', 'Customer only chooses how many tickets — no seat numbers']
+                  ].map(([value, title, hint]) => (
+                    <button
+                      type="button"
+                      key={value}
+                      onClick={() => setForm({ ...form, seating: value })}
+                      aria-pressed={form.seating === value}
+                      className={`rounded-xl border px-4 py-3 text-left transition-all ${
+                        form.seating === value
+                          ? 'border-[#FF6B5B] bg-[#FF6B5B]/10 ring-2 ring-[#FF6B5B]/20'
+                          : 'border-zinc-200 bg-zinc-50 hover:border-orange-300'
+                      }`}
+                    >
+                      <span className="block text-sm font-extrabold text-zinc-900">{title}</span>
+                      <span className="mt-0.5 block text-xs text-zinc-500">{hint}</span>
+                    </button>
+                  ))}
+                </div>
+                {form.seating === 'seated' && Number(form.totalSeats) > 0 && (
+                  <p className="text-xs text-zinc-400">
+                    Seat map: {SEATS_PER_ROW} seats per row → {Math.ceil(Number(form.totalSeats) / SEATS_PER_ROW)} rows
+                    (max {SEAT_MAP_LIMIT} seats).
+                  </p>
+                )}
+                {editingId && (
+                  <p className="text-xs text-zinc-400">Seating type can&apos;t be changed once tickets are sold.</p>
+                )}
+              </div>
+
               <div className="space-y-1">
-                <label htmlFor="price" className={labelClass}>Price per seat (₹)</label>
+                <label htmlFor="price" className={labelClass}>{form.seating === 'seated' ? 'Price per seat (₹)' : 'Price per ticket (₹)'}</label>
                 <input id="price" type="number" min={0} value={form.pricePerSeat} onChange={(e) => setForm({ ...form, pricePerSeat: e.target.value })} className={field} />
               </div>
 
               <div className="space-y-1">
-                <label htmlFor="totalSeats" className={labelClass}>Total seats</label>
+                <label htmlFor="totalSeats" className={labelClass}>{form.seating === 'seated' ? 'Total seats' : 'Total tickets (capacity)'}</label>
                 <input
                   id="totalSeats"
                   type="number"
@@ -313,7 +365,7 @@ export default function AdminPage() {
               </div>
 
               <div className="space-y-1">
-                <label htmlFor="availableSeats" className={labelClass}>Seats still on sale</label>
+                <label htmlFor="availableSeats" className={labelClass}>{form.seating === 'seated' ? 'Seats still on sale' : 'Tickets still on sale'}</label>
                 <input id="availableSeats" type="number" min={0} value={form.availableSeats} onChange={(e) => setForm({ ...form, availableSeats: e.target.value })} className={field} />
               </div>
 
@@ -327,14 +379,12 @@ export default function AdminPage() {
                 </select>
               </div>
 
-              <div className="space-y-1 md:col-span-2">
-                <label htmlFor="poster" className={labelClass}>Poster image URL</label>
-                <input id="poster" placeholder="https://…" value={form.posterImage} onChange={(e) => setForm({ ...form, posterImage: e.target.value })} className={field} />
+              <div className="md:col-span-2">
+                <MediaField id="poster" label="Poster image" kind="image" value={form.posterImage} onChange={(v) => setForm((f) => ({ ...f, posterImage: v }))} />
               </div>
 
-              <div className="space-y-1 md:col-span-2">
-                <label htmlFor="video" className={labelClass}>Video URL</label>
-                <input id="video" placeholder="https://…" value={form.videoUrl} onChange={(e) => setForm({ ...form, videoUrl: e.target.value })} className={field} />
+              <div className="md:col-span-2">
+                <MediaField id="video" label="Video" kind="video" value={form.videoUrl} onChange={(v) => setForm((f) => ({ ...f, videoUrl: v }))} />
               </div>
             </div>
 
