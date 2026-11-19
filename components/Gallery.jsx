@@ -9,7 +9,7 @@ import SectionHeading from './ui/SectionHeading.jsx'
 import SmokeBackdrop from './ui/SmokeBackdrop.jsx'
 import EmptyState from './ui/EmptyState.jsx'
 import DrawnArrow from './ui/DrawnArrow.jsx'
-import { ArrowIcon } from './ui/Icons.jsx'
+import { AlbumIcon, ArrowIcon } from './ui/Icons.jsx'
 
 const NAV_BTN =
   'group absolute z-50 flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white backdrop-blur-md transition-all hover:scale-110 hover:border-coral hover:bg-coral hover:shadow-[0_0_20px_rgba(255,107,91,0.5)]'
@@ -216,6 +216,17 @@ export default function Gallery() {
             </div>
           </>
         )}
+
+        <div className="mt-16 flex justify-center">
+          <Link
+            href="/album"
+            className="group inline-flex items-center gap-3 rounded-full border border-white/25 bg-white/5 px-8 py-4 font-display text-sm font-bold uppercase tracking-[0.25em] text-white backdrop-blur-md transition-all hover:-translate-y-1 hover:border-coral hover:bg-coral hover:shadow-glow-coral"
+          >
+            <AlbumIcon />
+            Watch Album
+            <ArrowIcon className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+          </Link>
+        </div>
       </div>
     </section>
   )

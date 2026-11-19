@@ -74,6 +74,9 @@ export default function MediaUploader({ folders = [], kind = 'all', defaultFolde
               <option key={f} value={f} />
             ))}
           </datalist>
+          <p className="text-[11px] text-zinc-400">
+            Album tip: use an event&apos;s exact title as the folder (e.g. &quot;Neon Fest 2026&quot;) and its files appear in that event&apos;s chapter of the public album.
+          </p>
         </div>
       </div>
 
