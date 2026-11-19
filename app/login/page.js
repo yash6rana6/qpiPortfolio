@@ -239,7 +239,7 @@ function LoginForm() {
     <main className="relative flex min-h-screen w-screen max-w-[100vw] items-center justify-end overflow-x-hidden overflow-y-auto bg-[#0d060e] p-4 lg:p-8">
       <div
         className="absolute inset-0 z-0 bg-cover bg-center"
-        style={{ backgroundImage: `url('/signupForm.png')` }}
+        style={{ backgroundImage: `url('/signupForm.webp')` }}
       />
 
       <div className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-transparent to-[#150711]/50" />

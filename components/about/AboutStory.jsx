@@ -19,7 +19,7 @@ function Stat({ value, label }) {
 
 export default function AboutStory() {
   // Live numbers straight from the DB — nothing hard-coded.
-  const { events } = useEvents()
+  const { events } = useEvents({ slim: true })
   const seats = events.reduce((sum, e) => sum + (e.totalSeats || 0), 0)
   const categories = new Set(events.map((e) => e.category).filter(Boolean)).size
 

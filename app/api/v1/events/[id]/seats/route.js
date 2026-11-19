@@ -1,11 +1,10 @@
 import mongoose from 'mongoose'
 import { connectDB } from '../../../../../../lib/mongodb'
-import Event from '../../../../../../models/Event'
 import Booking from '../../../../../../models/Booking'
 import { cached } from '../../../../../../lib/redis'
 import { ok, fail, ApiError } from '../../../../../../lib/api'
 import { allSeatLabels, hasSeatMap } from '../../../../../../lib/seats'
-import { getSeatMap } from '../../../../../../lib/seatStore'
+import { getEventLite, getSeatMap } from '../../../../../../lib/seatStore'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,8 +13,9 @@ export const dynamic = 'force-dynamic'
 export async function GET(_request, { params }) {
   try {
     if (!mongoose.isValidObjectId(params.id)) throw new ApiError(404, 'Event not found')
-    await connectDB()
-    const event = await Event.findById(params.id).select('status seating totalSeats availableSeats')
+    // Cached lookup (60s, cleared by admin edits): every open seat map polls this route every 5 seconds,
+    // so it must not hit MongoDB for the event each time.
+    const event = await getEventLite(params.id)
     if (!event || event.status !== 'published') throw new ApiError(404, 'Event not found')
     if (!hasSeatMap(event)) return ok({ total: event.totalSeats, mapped: false, taken: [] })
 
@@ -27,10 +27,12 @@ export async function GET(_request, { params }) {
     // Counted from the paid bookings themselves, NOT from availableSeats, so a drifted
     // availableSeats (or an admin edit) can never block seats that are really free.
     const legacy = await cached(`legacy-seats:${params.id}`, 30, async () => {
+      await connectDB()
       const [row] = await Booking.aggregate([
         {
           $match: {
-            event: event._id,
+            // aggregate() does not cast ids, and a cached event carries _id as a plain string.
+            event: new mongoose.Types.ObjectId(params.id),
             status: 'paid',
             $or: [{ seatNumbers: { $size: 0 } }, { seatNumbers: { $exists: false } }]
           }

@@ -20,18 +20,29 @@ import { ok, fail, readJson, requireFields, ApiError } from '../../../../lib/api
 
 export const dynamic = 'force-dynamic'
 
-// My bookings (abandoned/expired checkouts are hidden; they are not tickets)
-export async function GET() {
+// My bookings (abandoned/expired checkouts are hidden; they are not tickets).
+// Optional ?limit=&page= paginate (newest first); the total comes back in the X-Total-Count header.
+// Without them it answers the whole list, as before.
+export async function GET(request) {
   try {
     const session = await requireUser()
     await connectDB()
 
-    const bookings = await Booking.find({ user: session.sub, status: { $ne: 'expired' } })
-      .sort({ createdAt: -1 })
-      .populate('event', 'title venue city date posterImage')
-      .lean()
+    const { searchParams } = new URL(request.url)
+    const limit = Math.min(Math.max(parseInt(searchParams.get('limit'), 10) || 0, 0), 50)
+    const page = Math.max(parseInt(searchParams.get('page'), 10) || 1, 1)
 
-    return ok(bookings)
+    const filter = { user: session.sub, status: { $ne: 'expired' } }
+    let query = Booking.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .populate('event', 'title venue city date posterImage')
+    if (limit) query = query.skip((page - 1) * limit).limit(limit)
+
+    const [bookings, total] = await Promise.all([query.lean(), limit ? Booking.countDocuments(filter) : null])
+
+    const res = ok(bookings)
+    if (total !== null) res.headers.set('X-Total-Count', String(total))
+    return res
   } catch (err) {
     return fail(err)
   }

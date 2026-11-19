@@ -44,7 +44,7 @@ export default function ScanPage() {
 
   useEffect(() => {
     if (!isAdmin) return
-    fetch('/api/v1/events', { cache: 'no-store' })
+    fetch('/api/v1/events?view=card', { cache: 'no-store' })
       .then((r) => r.json())
       .then((d) => setEvents(Array.isArray(d) ? d : []))
       .catch(() => {})

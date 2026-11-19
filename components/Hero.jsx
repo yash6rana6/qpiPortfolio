@@ -34,6 +34,12 @@ export default function Hero() {
   const [typedText, setTypedText] = useState("");
   const [isTypingDone, setIsTypingDone] = useState(false);
 
+  // Data Saver / slow connection: skip the (very large) background video and keep the poster image.
+  useEffect(() => {
+    const conn = navigator.connection
+    if (conn && (conn.saveData || /(^|-)2g$/.test(conn.effectiveType || ''))) setVideoFailed(true);
+  }, []);
+
   const handleVideoError = () => {
     if (sourceIndex < STOCK_VIDEO_SOURCES.length - 1) {
       setSourceIndex((i) => i + 1);
@@ -161,7 +167,7 @@ export default function Hero() {
             muted
             loop
             playsInline
-            preload="auto"
+            preload="metadata"
             poster={VIDEO_POSTER_URL}
             onError={handleVideoError}
             src={STOCK_VIDEO_SOURCES[sourceIndex]}

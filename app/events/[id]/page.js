@@ -7,6 +7,7 @@ import Footer from '../../../components/Footer.jsx'
 import EmptyState from '../../../components/ui/EmptyState.jsx'
 import { useEvent } from '../../../lib/hooks.js'
 import { cn, formatDate, formatTime, formatPrice, posterBackground } from '../../../lib/utils.js'
+import { optimizedImage } from '../../../lib/media.js'
 
 function Fact({ label, value }) {
   return (
@@ -60,15 +61,16 @@ export default function EventPage() {
                   {event.videoUrl ? (
                     <video
                       src={event.videoUrl}
-                      poster={event.posterImage}
+                      poster={event.posterImage ? optimizedImage(event.posterImage, 1280) : undefined}
                       className="aspect-video w-full object-cover"
                       autoPlay
                       muted
                       loop
                       playsInline
+                      preload="metadata"
                     />
                   ) : (
-                    <div className="aspect-video w-full bg-cover bg-center" style={posterBackground(event.posterImage)} />
+                    <div className="aspect-video w-full bg-cover bg-center" style={posterBackground(event.posterImage, 1280)} />
                   )}
                 </div>
 

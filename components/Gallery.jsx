@@ -83,11 +83,11 @@ export default function Gallery() {
                 <>
                   <div
                     className="absolute left-0 top-1/2 hidden h-[60%] w-1/5 -translate-x-1/3 -translate-y-1/2 rounded-[2rem] bg-cover bg-center opacity-30 blur-[6px] transition-all duration-500 lg:block"
-                    style={posterBackground(prevItem?.posterImage)}
+                    style={posterBackground(prevItem?.posterImage, 400)}
                   />
                   <div
                     className="absolute right-0 top-1/2 hidden h-[60%] w-1/5 -translate-y-1/2 translate-x-1/3 rounded-[2rem] bg-cover bg-center opacity-30 blur-[6px] transition-all duration-500 lg:block"
-                    style={posterBackground(nextItem?.posterImage)}
+                    style={posterBackground(nextItem?.posterImage, 400)}
                   />
                   <button onClick={() => goTo(index - 1, -1)} aria-label="Previous event" className={cn(NAV_BTN, 'left-0 md:left-4')}>
                     <ArrowIcon direction="left" />
@@ -114,7 +114,7 @@ export default function Gallery() {
                     <div className="relative aspect-[4/5] w-full sm:aspect-[5/4]">
                       <div
                         className={cn('absolute inset-0 bg-cover bg-center transition-all duration-700 ease-out', hovered ? 'opacity-100' : 'opacity-80')}
-                        style={posterBackground(current.posterImage)}
+                        style={posterBackground(current.posterImage, 900)}
                       />
                       <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
 

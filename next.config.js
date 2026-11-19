@@ -32,13 +32,22 @@ const nextConfig = {
 
     const rules = [{ source: '/:path*', headers: security }]
 
+    // Files in /public never change under the same name, so let browsers keep them for a week
+    // (a changed photo should get a new file name). Next already caches /_next/static for a year.
+    const staticCache = [{ key: 'Cache-Control', value: 'public, max-age=604800, stale-while-revalidate=86400' }]
+    for (const source of ['/team/:path*', '/logo.svg', '/logoff.svg', '/signupForm.webp']) {
+      rules.push({ source, headers: staticCache })
+    }
+
     // CORS for /api/v1 (a future mobile app). The origin is read at BUILD time, so set ALLOWED_ORIGIN
     // before `next build`. Unset in production = same-origin only (no CORS headers at all);
     // unset in development = open '*' for convenience (never combined with credentials).
     const origin = process.env.ALLOWED_ORIGIN
     const cors = [
       { key: 'Access-Control-Allow-Methods', value: 'GET,POST,PUT,DELETE,OPTIONS' },
-      { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization' }
+      { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization' },
+      // lets a browser app read the total of a paginated list (X-Total-Count)
+      { key: 'Access-Control-Expose-Headers', value: 'X-Total-Count' }
     ]
     if (origin) {
       rules.push({

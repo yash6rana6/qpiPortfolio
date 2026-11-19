@@ -1,5 +1,6 @@
 import Link from 'next/link'
-import { cn, formatDate, formatTime, formatPrice, posterBackground } from '../../lib/utils.js'
+import PosterImg from '../ui/PosterImg.jsx'
+import { cn, formatDate, formatTime, formatPrice } from '../../lib/utils.js'
 
 export default function EventCard({ event, phase }) {
   const price = formatPrice(event.pricePerSeat)
@@ -11,9 +12,10 @@ export default function EventCard({ event, phase }) {
       className="group block overflow-hidden rounded-3xl bg-white shadow-sm transition-all duration-500 ease-spring hover:-translate-y-1.5 hover:shadow-xl"
     >
       <div className="relative aspect-[4/5] overflow-hidden bg-ink/5">
-        <div
-          className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-105"
-          style={posterBackground(event.posterImage)}
+        <PosterImg
+          src={event.posterImage}
+          width={380}
+          className="transition-transform duration-700 group-hover:scale-105"
         />
         <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/70 to-transparent" />
 

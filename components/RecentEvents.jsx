@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { gsap } from '../lib/motion.js'
 import { useEvents } from '../lib/hooks.js'
 import { formatDate, posterBackground } from '../lib/utils.js'
+import { optimizedImage } from '../lib/media.js'
+import LazyVideo from './ui/LazyVideo.jsx'
 
 const ACCENT = {
   pink: { hex: '#FF6B5B', shadow: 'rgba(255, 107, 91, 0.35)' },   // coral
@@ -56,16 +58,13 @@ function OvalVideo({ event, accent, slide }) {
       }}
     >
       {event.videoUrl ? (
-        <video
+        <LazyVideo
           className="h-full w-full object-cover scale-105 transition-transform duration-700 hover:scale-100"
           src={event.videoUrl}
-          autoPlay
-          muted
-          loop
-          playsInline
+          poster={event.posterImage ? optimizedImage(event.posterImage, 800) : undefined}
         />
       ) : (
-        <div className="h-full w-full bg-cover bg-center" style={posterBackground(event.posterImage)} />
+        <div className="h-full w-full bg-cover bg-center" style={posterBackground(event.posterImage, 800)} />
       )}
     </div>
   )

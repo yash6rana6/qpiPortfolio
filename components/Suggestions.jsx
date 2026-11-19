@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { formatDate, formatPrice, posterBackground } from '../lib/utils.js'
+import PosterImg from './ui/PosterImg.jsx'
+import { formatDate, formatPrice } from '../lib/utils.js'
 
 /**
  * Compact "you might also like" cards from /api/v1/events/suggestions.
@@ -48,11 +49,9 @@ export default function Suggestions({ title = 'You might also like', eventId, ci
             href={`/events/${item._id}`}
             className="group flex items-center gap-3 rounded-2xl bg-white p-2.5 shadow-sm transition-all duration-300 ease-spring hover:-translate-y-0.5 hover:shadow-md"
           >
-            <div
-              aria-hidden="true"
-              className="h-16 w-16 shrink-0 rounded-xl bg-cover bg-center"
-              style={posterBackground(item.posterImage)}
-            />
+            <div aria-hidden="true" className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl">
+              <PosterImg src={item.posterImage} width={64} />
+            </div>
 
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">

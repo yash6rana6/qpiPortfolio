@@ -27,6 +27,8 @@ const EMPTY_FORM = {
   status: 'published'
 }
 
+const LIST_PAGE_SIZE = 8 // events shown per page in the dashboard list
+
 const field =
   'w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-800 placeholder-zinc-400 outline-none transition-all focus:border-[#FF6B5B] focus:bg-white focus:ring-2 focus:ring-[#FF6B5B]/20'
 const labelClass = 'text-xs font-semibold text-zinc-500'
@@ -39,13 +41,15 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_FORM)
   const [editingId, setEditingId] = useState(null)
+  const [listPage, setListPage] = useState(1)
   const [original, setOriginal] = useState(null) // the event as it was when "Edit" was clicked
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const loadEvents = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/events', { cache: 'no-store' })
+      // fresh=1 (admin only) skips the public list cache, so seat counts here are exact
+      const res = await fetch('/api/v1/events?fresh=1', { cache: 'no-store' })
       const data = await res.json()
       setEvents(Array.isArray(data) ? data : [])
     } catch {
@@ -171,6 +175,11 @@ export default function AdminPage() {
     }
   }
 
+  // Pagination of the event list (deleting the last event on a page just moves back one page).
+  const listPages = Math.max(1, Math.ceil(events.length / LIST_PAGE_SIZE))
+  const currentPage = Math.min(listPage, listPages)
+  const pageEvents = events.slice((currentPage - 1) * LIST_PAGE_SIZE, currentPage * LIST_PAGE_SIZE)
+
   return (
     <main className="min-h-screen w-full bg-[#FFFDF9] px-6 py-12 text-zinc-800 md:px-16">
       <div className="flex items-center justify-between">
@@ -221,7 +230,7 @@ export default function AdminPage() {
           )}
 
           <div className="space-y-3">
-            {events.map((event) => (
+            {pageEvents.map((event) => (
               <div
                 key={event._id}
                 className="group flex items-center justify-between gap-4 rounded-2xl border border-orange-100 bg-white p-5 shadow-sm transition-all duration-200 hover:border-orange-300 hover:shadow-md"
@@ -266,6 +275,30 @@ export default function AdminPage() {
               </div>
             ))}
           </div>
+
+          {listPages > 1 && (
+            <div className="flex items-center justify-between pt-2">
+              <button
+                type="button"
+                onClick={() => setListPage(currentPage - 1)}
+                disabled={currentPage <= 1}
+                className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-xs font-bold text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-40"
+              >
+                ← Previous
+              </button>
+              <span className="text-xs font-medium text-zinc-500">
+                Page {currentPage} of {listPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setListPage(currentPage + 1)}
+                disabled={currentPage >= listPages}
+                className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-xs font-bold text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="rounded-3xl border border-orange-100 bg-white p-8 shadow-xl shadow-orange-500/5">

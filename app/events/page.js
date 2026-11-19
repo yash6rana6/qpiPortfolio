@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import Navbar from '../../components/Navbar.jsx'
 import Footer from '../../components/Footer.jsx'
 import EventCard from '../../components/events/EventCard.jsx'
@@ -15,32 +15,61 @@ const TABS = [
   { id: 'upcoming', label: 'Upcoming' }
 ]
 
+const PAGE_SIZE = 9 // cards shown at first, and added each time the visitor reaches the end
+
 export default function EventsPage() {
-  const { events, loading, error } = useEvents()
+  const { events, loading, error } = useEvents({ slim: true }) // cards only: no descriptions / videos
   const [city, setCity] = useCity()
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState(null) // null = auto (live if any, else upcoming)
+  const [visible, setVisible] = useState(PAGE_SIZE)
+  const sentinelRef = useRef(null)
+
+  // Typing stays responsive: the list re-filters a beat behind the input.
+  const deferredQuery = useDeferredValue(query)
 
   const cities = useMemo(() => citiesOf(events), [events])
 
   const { live, upcoming } = useMemo(() => {
     const now = Date.now()
-    const visible = events
+    const matching = events
       .filter((e) => !city || normalizeCity(e.city) === normalizeCity(city))
-      .filter((e) => matchesSearch(e, query))
+      .filter((e) => matchesSearch(e, deferredQuery))
       .map((e) => ({ event: e, phase: eventPhase(e, now) }))
       .filter((x) => x.phase !== 'past')
       .sort((a, b) => new Date(a.event.date || 8.64e15) - new Date(b.event.date || 8.64e15))
 
     return {
-      live: visible.filter((x) => x.phase === 'live'),
-      upcoming: visible.filter((x) => x.phase === 'upcoming')
+      live: matching.filter((x) => x.phase === 'live'),
+      upcoming: matching.filter((x) => x.phase === 'upcoming')
     }
-  }, [events, city, query])
+  }, [events, city, deferredQuery])
 
   const active = tab || (live.length ? 'live' : 'upcoming')
   const list = active === 'live' ? live : upcoming
   const counts = { live: live.length, upcoming: upcoming.length }
+
+  const shown = list.slice(0, visible)
+  const hasMore = list.length > visible
+
+  // A different city, search or tab starts again from the first page.
+  useEffect(() => {
+    setVisible(PAGE_SIZE)
+  }, [city, deferredQuery, active])
+
+  // Scrolling near the end loads the next page by itself (the button below does the same for keyboard users).
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setVisible((v) => v + PAGE_SIZE)
+      },
+      { rootMargin: '400px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, visible])
 
   return (
     <main className="min-h-screen bg-sand text-ink">
@@ -109,11 +138,25 @@ export default function EventsPage() {
           )}
 
           {!loading && list.length > 0 && (
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {list.map(({ event, phase }) => (
-                <EventCard key={event._id} event={event} phase={phase} />
-              ))}
-            </div>
+            <>
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                {shown.map(({ event, phase }) => (
+                  <EventCard key={event._id} event={event} phase={phase} />
+                ))}
+              </div>
+
+              {hasMore && (
+                <div ref={sentinelRef} className="mt-12 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setVisible((v) => v + PAGE_SIZE)}
+                    className="rounded-xl border border-ink/10 bg-white px-8 py-3.5 text-sm font-bold uppercase tracking-wide text-ink transition-colors hover:border-coral hover:text-coral"
+                  >
+                    Show more · {list.length - visible} left
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

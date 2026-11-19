@@ -24,12 +24,25 @@ const STATUS_LABEL = {
   failed: 'PAYMENT FAILED'
 }
 
+const PAGE_SIZE = 10
+
+/** One page of my bookings (newest first) plus how many I have in total. */
+async function fetchPage(page) {
+  const res = await fetch(`/api/v1/bookings?limit=${PAGE_SIZE}&page=${page}`, { cache: 'no-store' })
+  if (!res.ok) throw new Error('Could not load your tickets. Try again.')
+  const data = await res.json()
+  return { items: Array.isArray(data) ? data : [], total: Number(res.headers.get('X-Total-Count')) || 0 }
+}
+
 export default function BookingsPage() {
   const { user, loading: authLoading } = useAuth()
   const router = useRouter()
 
   const [bookings, setBookings] = useState([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [cancelling, setCancelling] = useState(null)
   const [notice, setNotice] = useState('')
 
@@ -40,12 +53,33 @@ export default function BookingsPage() {
       return
     }
 
-    fetch('/api/v1/bookings', { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => setBookings(Array.isArray(data) ? data : []))
+    fetchPage(1)
+      .then(({ items, total: count }) => {
+        setBookings(items)
+        setTotal(count)
+      })
       .catch(() => setBookings([]))
       .finally(() => setLoading(false))
   }, [user, authLoading, router])
+
+  async function loadMore() {
+    setLoadingMore(true)
+    try {
+      const next = page + 1
+      const { items, total: count } = await fetchPage(next)
+      // A booking made meanwhile shifts the pages by one, so skip anything already on screen.
+      setBookings((list) => {
+        const seen = new Set(list.map((b) => b._id))
+        return [...list, ...items.filter((b) => !seen.has(b._id))]
+      })
+      setTotal(count)
+      setPage(next)
+    } catch (err) {
+      setNotice(err.message)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   if (authLoading || !user) {
     return <main className="min-h-screen bg-[#faf8f5]" />
@@ -216,6 +250,8 @@ export default function BookingsPage() {
                       alt={`QR code for ticket ${booking.bookingCode}`}
                       width={120}
                       height={120}
+                      loading="lazy"
+                      decoding="async"
                       className="h-[120px] w-[120px] border border-slate-200 bg-white p-1"
                     />
                     <div className="flex flex-col items-start gap-2">
@@ -260,6 +296,19 @@ export default function BookingsPage() {
               </div>
             </article>
           ))}
+
+          {!loading && bookings.length < total && (
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="border-2 border-slate-900/10 bg-white px-8 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition-colors hover:border-rose-400 hover:text-rose-600 disabled:opacity-50"
+              >
+                {loadingMore ? 'Loading…' : `Load more tickets · ${total - bookings.length} left`}
+              </button>
+            </div>
+          )}
         </div>
 
         {!loading && (

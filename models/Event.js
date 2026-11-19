@@ -25,4 +25,7 @@ const EventSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
+// The public list: published events, newest first (also serves the recent-events filter).
+EventSchema.index({ status: 1, date: -1 })
+
 export default mongoose.models.Event || mongoose.model('Event', EventSchema)

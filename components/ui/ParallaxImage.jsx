@@ -45,6 +45,8 @@ export default function ParallaxImage({ src, alt = '', amount = 8, fallback = nu
         ref={imgRef}
         src={src}
         alt={alt}
+        loading="lazy"
+        decoding="async"
         onError={() => setFailed(true)}
         className={cn('absolute inset-x-0 -top-[12%] h-[124%] w-full object-cover', imgClassName)}
       />
